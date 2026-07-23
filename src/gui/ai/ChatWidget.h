@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QString>
 #include <QWidget>
 #include <memory>
 #include <vector>
@@ -9,6 +10,8 @@
 
 class QLabel;
 class QTimer;
+class QPushButton;
+class QDockWidget;
 
 class MessageBubble : public QWidget
 {
@@ -34,31 +37,54 @@ public:
   ChatWidget(QWidget *parent = nullptr);
   virtual ~ChatWidget();
 
-  void proposeCodeChange(const std::string& code);
-  bool hasPendingCodeChanges() const;
+  void applyCodeChange(const std::string& code);
   void logToolExecution(const std::string& name, const std::string& result);
   void startNewResponseTurn();
+  void setCollapsed(bool collapsed);
+  bool isCollapsed() const { return panelCollapsed; }
+
+signals:
+  void collapsedChanged(bool collapsed);
 
 private slots:
   void onSendPressed();
   void onClearPressed();
+  void onHistoryPressed();
+  void onMorePressed();
+  void onTogglePanelPressed();
 
 private:
   MessageBubble *addMessage(const QString& text, bool isUser);
   bool isDarkTheme() const;
+  void applyVSCodeChrome();
+  void setupCursorComposer();
+  void setupCursorHeader();
+  void updateComposerActionButton();
   void enableInput(bool enabled);
   std::string executeTool(const std::string& name, const std::string& arguments_json);
+
+  void clearMessageWidgets();
+  void rebuildMessageWidgets();
+  void saveCurrentSession();
+  void loadSession(const QString& sessionId);
+  QString sessionTitleFromHistory() const;
+  QDockWidget *parentDock() const;
+  void restoreExpandedChrome();
 
   std::shared_ptr<AIService> aiService;
   std::vector<ChatMessage> history;
   std::shared_ptr<bool> aliveState;
+  QString currentSessionId;
 
   MessageBubble *activeAIBubble = nullptr;
   std::shared_ptr<std::string> activeResponseText;
   bool isRequestRunning = false;
+  bool panelCollapsed = false;
+  int expandedDockWidth = 320;
 
-  std::string proposedCode;
-  std::string originalCode;
-  QWidget *diffBannerWidget = nullptr;
   CollapsibleBubble *activeToolBubble = nullptr;
+  QPushButton *attachButton = nullptr;
+  QPushButton *historyButton = nullptr;
+  QPushButton *moreButton = nullptr;
+  QPushButton *layoutButton = nullptr;
 };

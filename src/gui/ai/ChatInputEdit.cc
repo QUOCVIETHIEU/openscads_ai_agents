@@ -1,10 +1,17 @@
 #include "gui/ai/ChatInputEdit.h"
+#include <QFrame>
 #include <QKeyEvent>
 
 ChatInputEdit::ChatInputEdit(QWidget *parent) : QPlainTextEdit(parent)
 {
-  setPlaceholderText(tr("Ask AI..."));
-  setFixedHeight(50);
+  setPlaceholderText(tr("Add a follow-up"));
+  setFrameStyle(QFrame::NoFrame);
+  setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  setTabChangesFocus(false);
+  document()->setDocumentMargin(0);
+  setMinimumHeight(28);
+  setMaximumHeight(80);
 }
 
 void ChatInputEdit::keyPressEvent(QKeyEvent *event)

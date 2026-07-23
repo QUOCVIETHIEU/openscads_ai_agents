@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 #
 # This script builds all library dependencies of OpenSCAD for Mac OS X.
-# The libraries will be build in 64-bit mode and backwards compatible
-# with 10.13 "High Sierra".
+# This fork builds Apple Silicon (arm64) only — Intel/x86_64 is not supported.
 #
 # This script must be run from the OpenSCAD source root directory.
-# By default, dependencies will be built for the local architecture.
+# By default, dependencies will be built for arm64.
 #
 # Usage: macosx-build-dependencies.sh [-dflaxv] [<package>]
 #  -d         Build for deployment (if not specified, e.g. Sparkle won't be built)
 #  -f         Force build even if package is installed
 #  -l MINUTES Build time limit in minutes
-#  -a         Build arm64 binaries
-#  -x         Build x86_64 binaries
+#  -a         Build arm64 binaries (default; kept for compatibility)
+#  -x         (Rejected) Intel/x86_64 builds are not supported
 #  -v         Verbose
 #
 # Prerequisites: automake, libtool, cmake, pkg-config, wget, meson, python-packaging
@@ -116,15 +115,15 @@ DEPLOY_PACKAGES=(
 
 printUsage()
 {
-  echo "Usage: $0 [-dflaxv] [<package>]"
+  echo "Usage: $0 [-dflav] [<package>]"
   echo
   echo "  -d          Build for deployment"
   echo "  -f          Force build even if package is installed"
   echo "  -l MINUTES  Build time limit in minutes"
-  echo "  -a          Build arm64 binaries"
-  echo "  -x          Build x86_64 binaries"
+  echo "  -a          Build arm64 binaries (default)"
   echo "  -v          Verbose"
   echo
+  echo "  Intel/x86_64 (-x) is not supported in this fork."
   echo "  If <package> is not specified, builds all packages"
 }
 
@@ -911,7 +910,7 @@ do
     f) OPTION_FORCE=1;;
     l) TIME_LIMIT=${OPTARG}; if [ "$TIME_LIMIT" -gt 0 ]; then echo time limit $TIME_LIMIT minutes; else printUsage;exit 1; fi;;
     a) OPTION_ARM64=true;;
-    x) OPTION_X86_64=true;;
+    x) echo "Error: Intel (x86_64) macOS builds are not supported in this fork (Apple Silicon only)." >&2; exit 1;;
     v) echo verbose on;;
     *) printUsage;exit 1;;
   esac
@@ -920,6 +919,10 @@ done
 START_TIME=$(( $(date +%s) / 60 ))
 STOP_TIME=$(( $START_TIME + $TIME_LIMIT ))
 OPTION_PACKAGES="${@:$OPTIND}"
+
+# Apple Silicon only: always build arm64 (ignore host arch for target selection)
+OPTION_ARM64=true
+OPTION_X86_64=false
 
 OSX_MAJOR_VERSION=`sw_vers -productVersion | cut -d. -f1`
 OSX_VERSION=`sw_vers -productVersion | cut -d. -f2`
@@ -967,19 +970,9 @@ fi
 
 ARCHS=()
 GNU_ARCHS=()
-if $OPTION_ARM64 || $OPTION_X86_64; then
-  if $OPTION_ARM64; then
-    ARCHS+=(arm64)
-    GNU_ARCHS+=(aarch64)
-  fi
-  if $OPTION_X86_64; then
-    ARCHS+=(x86_64)
-	  GNU_ARCHS+=(x86_64)
-  fi
-else
-    ARCHS+=($LOCAL_ARCH)
-    GNU_ARCHS+=($LOCAL_GNU_ARCH)
-fi
+# This fork always targets Apple Silicon (arm64)
+ARCHS+=(arm64)
+GNU_ARCHS+=(aarch64)
 ARCHS_COMBINED=$(IFS=\; ; echo "${ARCHS[*]}")
 # Some libraries needs to build arm64 first, while others need x86_64 first (e.g. Qt6)
 ARCHS_REV=()
@@ -987,7 +980,7 @@ for ((i=${#ARCHS[@]}-1; i>=0; i--)); do
   ARCHS_REV+=("${ARCHS[i]}");
 done
 ARCHS_COMBINED_REV=$(IFS=\; ; echo "${ARCHS_REV[*]}")
-echo "Building on $LOCAL_ARCH for $ARCHS_COMBINED"
+echo "Building on $LOCAL_ARCH for $ARCHS_COMBINED (Apple Silicon only)"
 
 echo "Building for macOS $MAC_OSX_VERSION_MIN or later"
 

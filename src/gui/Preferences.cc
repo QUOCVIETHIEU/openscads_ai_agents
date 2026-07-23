@@ -33,6 +33,7 @@
 #include <QFont>
 #include <QFontComboBox>
 #include <QFontDatabase>
+#include <QFontInfo>
 #include <QKeyEvent>
 #include <QListWidget>
 #include <QListWidgetItem>
@@ -168,25 +169,62 @@ Preferences::Preferences(QWidget *parent) : QMainWindow(parent)
 
 void Preferences::init()
 {
-  // Editor pane
-  // Setup default font (Try to use a nice monospace font)
-  const QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-  const QString found_family{QFontInfo{font}.family()};
-  this->defaultmap["editor/fontfamily"] = found_family;
-  this->defaultmap["editor/fontsize"] = 12;
+  // VS Code-like defaults: UI ~13pt system, editor monospace 14pt
+  QString editorFamily;
+  QString uiFamily;
+#ifdef Q_OS_MACOS
+  editorFamily = QStringLiteral("Menlo");
+  uiFamily = QStringLiteral(".AppleSystemUIFont");
+#elif defined(Q_OS_WIN)
+  editorFamily = QStringLiteral("Consolas");
+  uiFamily = QStringLiteral("Segoe UI");
+#else
+  editorFamily = QStringLiteral("Droid Sans Mono");
+  uiFamily = QStringLiteral("Ubuntu");
+#endif
+  // Fall back if the preferred face is missing on this machine
+  {
+    const QFont editorProbe(editorFamily);
+    if (QFontInfo(editorProbe).family().compare(editorFamily, Qt::CaseInsensitive) != 0) {
+      editorFamily = QFontInfo(QFontDatabase::systemFont(QFontDatabase::FixedFont)).family();
+    }
+    if (!uiFamily.startsWith('.')) {
+      const QFont uiProbe(uiFamily);
+      if (QFontInfo(uiProbe).family().compare(uiFamily, Qt::CaseInsensitive) != 0) {
+        uiFamily = QFontInfo(QFont()).family();
+      }
+    }
+  }
+
+  this->defaultmap["editor/fontfamily"] = editorFamily;
+  this->defaultmap["editor/fontsize"] = 14;
   this->defaultmap["editor/syntaxhighlight"] = "For Light Background";
 
-  const QFont applicationFont = QTextDocument().defaultFont();
-  this->defaultmap["advanced/applicationFontFamily"] = applicationFont.family();
-  this->defaultmap["advanced/applicationFontSize"] = applicationFont.pointSize();
+  this->defaultmap["advanced/applicationFontFamily"] = uiFamily;
+  this->defaultmap["advanced/applicationFontSize"] = 13;
 
-  // Leave Console font with default if user has not chosen another.
-  this->defaultmap["advanced/consoleFontFamily"] = applicationFont.family();
-  this->defaultmap["advanced/consoleFontSize"] = applicationFont.pointSize();
+  this->defaultmap["advanced/consoleFontFamily"] = editorFamily;
+  this->defaultmap["advanced/consoleFontSize"] = 13;
 
-  // Leave Customizer font with default if user has not chosen another.
-  this->defaultmap["advanced/customizerFontFamily"] = applicationFont.family();
-  this->defaultmap["advanced/customizerFontSize"] = applicationFont.pointSize();
+  this->defaultmap["advanced/customizerFontFamily"] = uiFamily;
+  this->defaultmap["advanced/customizerFontSize"] = 13;
+
+  // One-time migration so existing installs pick up VS Code typography
+  {
+    QSettingsCached settings;
+    constexpr int kVsCodeFontVersion = 1;
+    if (settings.value("ui/vscodeFontVersion", 0).toInt() < kVsCodeFontVersion) {
+      settings.setValue("editor/fontfamily", editorFamily);
+      settings.setValue("editor/fontsize", 14);
+      settings.setValue("advanced/applicationFontFamily", uiFamily);
+      settings.setValue("advanced/applicationFontSize", 13);
+      settings.setValue("advanced/consoleFontFamily", editorFamily);
+      settings.setValue("advanced/consoleFontSize", 13);
+      settings.setValue("advanced/customizerFontFamily", uiFamily);
+      settings.setValue("advanced/customizerFontSize", 13);
+      settings.setValue("ui/vscodeFontVersion", kVsCodeFontVersion);
+    }
+  }
 
 #ifdef Q_OS_MACOS
   this->defaultmap["editor/ctrlmousewheelzoom"] = false;
@@ -230,7 +268,7 @@ void Preferences::init()
   this->defaultmap["advanced/enableParameterCheck"] = true;
   this->defaultmap["advanced/enableParameterRangeCheck"] = false;
   this->defaultmap["view/hideEditor"] = false;
-  this->defaultmap["view/hideConsole"] = false;
+  this->defaultmap["view/hideConsole"] = true;
   this->defaultmap["view/hideErrorLog"] = true;
   this->defaultmap["view/hideAnimate"] = true;
   this->defaultmap["view/hideCustomizer"] = true;
@@ -311,16 +349,14 @@ void Preferences::init()
           "`cube(10);`) MUST end with a semicolon. Semicolons are NOT used after module definitions "
           "`module name() { ... }` or after blocks `{ ... }`.\n"
           "3. **Tool Workflow**:\n"
-          "   - YOU MUST USE `set_editor_code` to propose any code changes so they are set for user "
-          "review.\n"
+          "   - YOU MUST USE `set_editor_code` to apply any code changes. This immediately updates the "
+          "editor and triggers a 3D preview.\n"
           "   - You can output code blocks in markdown format in the chat for explanation, but you MUST "
-          "also "
-          "call the `set_editor_code` tool so the changes are set for review and can be applied "
-          "automatically.\n"
+          "also call the `set_editor_code` tool so the changes are applied automatically.\n"
           "   - Use `get_editor_code()` if you need to see the latest script state.\n"
-          "   - Use `trigger_preview()` once after setting the code to validate the result.\n"
-          "4. **Response and Engagement**: Explain the reasoning behind your proposed code changes. "
-          "Output standard text to explain your thoughts and keep the user engaged while proposing code "
+          "   - Use `trigger_preview()` if you need to re-render without changing code.\n"
+          "4. **Response and Engagement**: Explain the reasoning behind your code changes. Output "
+          "standard text to explain your thoughts and keep the user engaged while applying code "
           "changes via tools.\n"
           "5. **Formatting**: Use ACTUAL NEWLINES in your code output. Never use literal '\\n' "
           "sequences.\n"
@@ -471,6 +507,18 @@ void Preferences::update()
     Settings::Settings::printServiceAlwaysShowDialog.value());
 }
 
+void Preferences::showAISettings()
+{
+  update();
+  if (prefsActionAI) {
+    prefsActionAI->setChecked(true);
+    actionTriggered(prefsActionAI);
+  }
+  show();
+  activateWindow();
+  raise();
+}
+
 /**
  * Add a page for the preferences GUI. This handles both the action grouping
  * and the registration of the widget for each action to have a generalized
@@ -558,7 +606,8 @@ void Preferences::setupFeaturesPage()
     Feature *feature = *it;
 
     QString featurekey = QString("feature/%1").arg(QString::fromStdString(feature->get_name()));
-    this->defaultmap[featurekey] = false;
+    // AI-first layout: enable AI features by default
+    this->defaultmap[featurekey] = (feature == &Feature::ExperimentalAiFeatures);
 
     // spacer item between the features, just for some optical separation
     gridLayoutExperimentalFeatures->addItem(
@@ -1489,14 +1538,14 @@ void Preferences::on_pushButtonAINewProfile_clicked()
     "`cube(10);`) MUST end with a semicolon. Semicolons are NOT used after module definitions `module "
     "name() { ... }` or after blocks `{ ... }`.\n"
     "3. **Tool Workflow**:\n"
-    "   - YOU MUST USE `set_editor_code` to propose any code changes so they are set for user review.\n"
+    "   - YOU MUST USE `set_editor_code` to apply any code changes. This immediately updates the editor "
+    "and triggers a 3D preview.\n"
     "   - You can output code blocks in markdown format in the chat for explanation, but you MUST also "
-    "call the `set_editor_code` tool so the changes are set for review and can be applied "
-    "automatically.\n"
+    "call the `set_editor_code` tool so the changes are applied automatically.\n"
     "   - Use `get_editor_code()` if you need to see the latest script state.\n"
-    "   - Use `trigger_preview()` once after setting the code to validate the result.\n"
-    "4. **Response and Engagement**: Explain the reasoning behind your proposed code changes. Output "
-    "standard text to explain your thoughts and keep the user engaged while proposing code changes via "
+    "   - Use `trigger_preview()` if you need to re-render without changing code.\n"
+    "4. **Response and Engagement**: Explain the reasoning behind your code changes. Output "
+    "standard text to explain your thoughts and keep the user engaged while applying code changes via "
     "tools.\n"
     "5. **Formatting**: Use ACTUAL NEWLINES in your code output. Never use literal '\\n' sequences.\n"
     "6. **Tone**: Technical, concise, and helpful. Avoid long conversational filler.";
@@ -1640,16 +1689,14 @@ void Preferences::loadAIParams(const QString& profileName)
       "`cube(10);`) MUST end with a semicolon. Semicolons are NOT used after module definitions `module "
       "name() { ... }` or after blocks `{ ... }`.\n"
       "3. **Tool Workflow**:\n"
-      "   - YOU MUST USE `set_editor_code` to propose any code changes so they are set for user "
-      "review.\n"
+      "   - YOU MUST USE `set_editor_code` to apply any code changes. This immediately updates the "
+      "editor and triggers a 3D preview.\n"
       "   - You can output code blocks in markdown format in the chat for explanation, but you MUST "
-      "also "
-      "call the `set_editor_code` tool so the changes are set for review and can be applied "
-      "automatically.\n"
+      "also call the `set_editor_code` tool so the changes are applied automatically.\n"
       "   - Use `get_editor_code()` if you need to see the latest script state.\n"
-      "   - Use `trigger_preview()` once after setting the code to validate the result.\n"
-      "4. **Response and Engagement**: Explain the reasoning behind your proposed code changes. Output "
-      "standard text to explain your thoughts and keep the user engaged while proposing code changes "
+      "   - Use `trigger_preview()` if you need to re-render without changing code.\n"
+      "4. **Response and Engagement**: Explain the reasoning behind your code changes. Output "
+      "standard text to explain your thoughts and keep the user engaged while applying code changes "
       "via tools.\n"
       "5. **Formatting**: Use ACTUAL NEWLINES in your code output. Never use literal '\\n' sequences.\n"
       "6. **Tone**: Technical, concise, and helpful. Avoid long conversational filler.";

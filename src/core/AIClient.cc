@@ -213,7 +213,7 @@ nlohmann::json getOpenSCADTools()
   nlohmann::json sec_fn = nlohmann::json::object();
   sec_fn["name"] = "set_editor_code";
   sec_fn["description"] =
-    "Propose changes to the current script in the editor. Use this to update the script.";
+    "Apply complete OpenSCAD source code to the editor and trigger a 3D preview render.";
   nlohmann::json sec_params = nlohmann::json::object();
   sec_params["type"] = "object";
   nlohmann::json sec_props = nlohmann::json::object();

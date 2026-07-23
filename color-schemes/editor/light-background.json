@@ -1,7 +1,7 @@
 {
     "name" : "For Light Background",
     "index" : 1000,
-    "paper" : "#ffffff",
+    "paper" : "#f8f8f8",
     "text" : "#272822",
     "caret" : {
         "width" : 2,

@@ -46,9 +46,8 @@ const Feature Feature::ExperimentalVectorSwizzle(
 const Feature Feature::ExperimentalDiscretizationByError(
   "discretization-by-error",
   "Specify the maximum error in $fe and shapes will be segmented appropriately.");
-const Feature Feature::ExperimentalAiFeatures("ai-features",
-                                              "Enable AI features (Note: AI integration is under "
-                                              "development and does not connect to external APIs yet).");
+const Feature Feature::ExperimentalAiFeatures(
+  "ai-features", "Enable AI assistant for generating OpenSCAD code via configured API endpoints.");
 
 #ifdef ENABLE_PYTHON
 const Feature Feature::ExperimentalPythonEngine(

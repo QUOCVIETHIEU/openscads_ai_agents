@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QCursor>
 #include <QEvent>
+#include <QFrame>
 #include <QGuiApplication>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QKeyCombination>
@@ -108,6 +109,11 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
   lexer = nullptr;
   scintillaLayout = new QVBoxLayout(this);
   qsci = new QsciScintilla(this);
+  // Flat editor surface — no native 3D/sunken frame around the text area
+  qsci->setFrameShape(QFrame::NoFrame);
+  qsci->setFrameShadow(QFrame::Plain);
+  qsci->setLineWidth(0);
+  qsci->setMidLineWidth(0);
 
   contentsRendered = false;
   findState = 0;  // FIND_HIDDEN
@@ -469,7 +475,11 @@ void ScintillaEditor::setColormap(const EditorColorScheme *colorScheme)
   try {
     auto font = this->lexer->font(this->lexer->defaultStyle());
     const QColor textColor(pt.get<std::string>("text").c_str());
-    const QColor paperColor(pt.get<std::string>("paper").c_str());
+    QColor paperColor(pt.get<std::string>("paper").c_str());
+    // Match AI chat workbench surface (avoid stark pure-white editor paper)
+    if (paperColor == QColor(Qt::white) || paperColor.name(QColor::HexRgb).toLower() == QLatin1String("#ffffff")) {
+      paperColor = QColor(QStringLiteral("#f8f8f8"));
+    }
 
 #if ENABLE_LEXERTL
 
@@ -665,7 +675,7 @@ void ScintillaEditor::setColormap(const EditorColorScheme *colorScheme)
 
 void ScintillaEditor::noColor()
 {
-  this->lexer->setPaper(Qt::white);
+  this->lexer->setPaper(QColor(QStringLiteral("#f8f8f8")));
   this->lexer->setColor(Qt::black);
   qsci->setCaretWidth(2);
   qsci->setCaretForegroundColor(Qt::black);

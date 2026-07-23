@@ -10,6 +10,7 @@
 #include "geometry/cgal/CGALCache.h"
 #endif
 #include <QApplication>
+#include <QFont>
 #include <QEvent>
 #include <QObject>
 #include <QProgressDialog>
@@ -100,11 +101,17 @@ void OpenSCADApp::setRenderBackend3D(RenderBackend3D backend)
 
 void OpenSCADApp::setApplicationFont(const QString& family, uint size)
 {
-  // Trigger style sheet refresh to update the application font
-  // (hopefully) everywhere. Also remove ugly frames in the QStatusBar
-  // when using additional widgets
+  // VS Code-like UI typography: system UI face at ~13pt across the workbench
+  QFont appFont(family.isEmpty() ? QFont().family() : family, size > 0 ? int(size) : 13);
+  appFont.setStyleHint(QFont::SansSerif);
+  QApplication::setFont(appFont);
+
   const auto stylesheet = QString(R"(
     * {
+        font-family: '%1';
+        font-size: %2pt;
+    }
+    QMenuBar, QMenu, QToolBar, QStatusBar, QDockWidget, QTabBar {
         font-family: '%1';
         font-size: %2pt;
     }
@@ -112,7 +119,7 @@ void OpenSCADApp::setApplicationFont(const QString& family, uint size)
         border: 0px solid black;
     }
   )");
-  scadApp->setStyleSheet(stylesheet.arg(family, QString::number(size)));
+  scadApp->setStyleSheet(stylesheet.arg(family, QString::number(size > 0 ? size : 13)));
 }
 
 // For Qt5, simulate the Qt6 behavior.

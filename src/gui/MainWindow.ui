@@ -149,23 +149,13 @@
         </widget>
        </item>
        <item>
-        <widget class="QGLView" name="qglview" native="true">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="minimumSize">
+        <widget class="QToolBar" name="viewerToolBar">
+         <property name="iconSize">
           <size>
-           <width>200</width>
-           <height>100</height>
+           <width>16</width>
+           <height>16</height>
           </size>
          </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QToolBar" name="viewerToolBar">
          <addaction name="designActionPreview"/>
          <addaction name="designActionRender"/>
          <addaction name="separator"/>
@@ -191,9 +181,25 @@
          <addaction name="viewActionShowEdges"/>
         </widget>
        </item>
+       <item>
+        <widget class="QGLView" name="qglview" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>200</width>
+           <height>100</height>
+          </size>
+         </property>
+        </widget>
+       </item>
       </layout>
-      <zorder>qglview</zorder>
       <zorder>viewerToolBar</zorder>
+      <zorder>qglview</zorder>
       <zorder>frameCompileResult</zorder>
      </widget>
     </item>
@@ -418,6 +424,12 @@
      </property>
      <item>
       <widget class="QToolBar" name="editortoolbar">
+       <property name="iconSize">
+        <size>
+         <width>16</width>
+         <height>16</height>
+        </size>
+       </property>
        <addaction name="fileActionNew"/>
        <addaction name="fileActionOpen"/>
        <addaction name="fileActionSave"/>
@@ -454,14 +466,23 @@
         <number>0</number>
        </property>
        <layout class="QGridLayout" name="gridLayout">
+        <property name="leftMargin">
+         <number>8</number>
+        </property>
         <property name="topMargin">
-         <number>0</number>
+         <number>6</number>
+        </property>
+        <property name="rightMargin">
+         <number>8</number>
         </property>
         <property name="bottomMargin">
-         <number>0</number>
+         <number>6</number>
+        </property>
+        <property name="horizontalSpacing">
+         <number>6</number>
         </property>
         <property name="verticalSpacing">
-         <number>0</number>
+         <number>6</number>
         </property>
         <item row="0" column="0">
          <widget class="QComboBox" name="findTypeComboBox">

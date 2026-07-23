@@ -47,6 +47,8 @@
 #include <iostream>
 #include <QApplication>
 #include <QWheelEvent>
+#include <QEvent>
+#include <QNativeGestureEvent>
 #include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QMouseEvent>
@@ -464,7 +466,24 @@ bool QGLView::save(const char *filename) const
 void QGLView::wheelEvent(QWheelEvent *event)
 {
   const auto pos = Q_WHEEL_EVENT_POSITION(event);
-  const int v = event->angleDelta().y();
+
+  // Mouse wheels usually report angleDelta (120 per notch).
+  // macOS trackpads often report pixelDelta with angleDelta == 0.
+  int v = event->angleDelta().y();
+  if (v == 0) v = event->angleDelta().x();
+  if (v == 0) {
+    const QPoint pixels = event->pixelDelta();
+    if (!pixels.isNull()) {
+      const int px = pixels.y() != 0 ? pixels.y() : pixels.x();
+      // Scale pixel scroll into wheel-notch units used by Camera::zoom()
+      v = px * 4;
+    }
+  }
+  if (v == 0) {
+    event->ignore();
+    return;
+  }
+
   if (QApplication::keyboardModifiers() & Qt::ShiftModifier) {
     zoomFov(v);
   } else if (this->mouseCentricZoom) {
@@ -472,6 +491,34 @@ void QGLView::wheelEvent(QWheelEvent *event)
   } else {
     zoom(v, true);
   }
+  event->accept();
+}
+
+bool QGLView::event(QEvent *event)
+{
+  // Trackpad pinch-to-zoom (macOS / some other platforms)
+  if (event->type() == QEvent::NativeGesture) {
+    auto *gesture = static_cast<QNativeGestureEvent *>(event);
+    if (gesture->gestureType() == Qt::ZoomNativeGesture) {
+      // gesture->value() is a small relative scale delta (e.g. 0.01)
+      const int v = qRound(gesture->value() * 600.0);
+      if (v != 0) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        const QPointF local = gesture->position();
+#else
+        const QPointF local = gesture->pos();
+#endif
+        if (this->mouseCentricZoom) {
+          zoomCursor(int(local.x()), int(local.y()), v);
+        } else {
+          zoom(v, true);
+        }
+      }
+      event->accept();
+      return true;
+    }
+  }
+  return QOpenGLWidget::event(event);
 }
 
 void QGLView::ZoomIn()

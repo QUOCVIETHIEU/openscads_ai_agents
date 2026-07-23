@@ -159,6 +159,8 @@ in a comment on the issue.
 
 ### Building for macOS
 
+> **This fork:** Apple Silicon (`arm64`) only — see [doc/ai-first-build.md](doc/ai-first-build.md) for macOS / Windows / WASM CI and build notes.
+
 Prerequisites:
 
 * Xcode

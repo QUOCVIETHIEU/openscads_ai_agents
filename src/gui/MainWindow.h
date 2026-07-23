@@ -24,6 +24,7 @@
 #include <QTemporaryFile>
 #include <QTime>
 #include <QTimer>
+#include <QToolButton>
 #include <QUrl>
 #include <QWidget>
 #include <ctime>
@@ -103,6 +104,8 @@ public:
   EditorInterface *activeEditor = nullptr;
   TabManager *tabManager;
   AIDock *aiDock;
+  QToolButton *aiChatRevealButton = nullptr;
+  QWidget *previewHeaderRow = nullptr;
 
   std::shared_ptr<const Geometry> rootGeom;
   std::shared_ptr<Renderer> geomRenderer;
@@ -158,6 +161,9 @@ private:
   void restoreWindowState();
   void openRemainingFiles(const QStringList& filenames);
   void setupAIDock();
+  void applyFlatWorkbenchChrome();
+  void setupAIChatRevealButton();
+  void updateAIChatRevealButton(bool chatHidden);
 
 protected:
   void closeEvent(QCloseEvent *event) override;

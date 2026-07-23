@@ -42,6 +42,7 @@ public:
   void fireEditorConfigChanged() const;
   void fireApplicationFontChanged() const;
   void insertListItem(QListWidget *listBox, QListWidgetItem *listItem);
+  void showAISettings();
 
 public slots:
   void actionTriggered(class QAction *);

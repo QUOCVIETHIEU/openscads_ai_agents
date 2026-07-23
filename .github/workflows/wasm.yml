@@ -1,0 +1,65 @@
+name: WebAssembly (WASM) Build
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build_wasm_web:
+    name: wasm-web
+    runs-on: ubuntu-latest
+    container:
+      image: openscad/wasm-base-release:latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: 'recursive'
+      - name: Install Node.js (for wasm-check)
+        run: |
+          npm i -g n
+          n latest
+          export PATH="/usr/local/bin:$PATH"
+          node --version
+          echo "PATH=/usr/local/bin:$PATH" >> $GITHUB_ENV
+      - name: Install Puppeteer deps for web check
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxcomposite1 libxdamage1 \
+            libxfixes3 libxrandr2 libgbm1 libxkbcommon0 libpango-1.0-0 libcairo2 \
+            zip
+          npm init -y
+          npm i puppeteer
+          npx puppeteer browsers install chrome
+      - name: Configure (Emscripten web)
+        run: |
+          emcmake cmake -G Ninja -B build-web \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWASM_BUILD_TYPE=web \
+            -DEXPERIMENTAL=ON \
+            -DSNAPSHOT=ON
+      - name: Build
+        run: |
+          cmake --build build-web -j$(nproc)
+      - name: Verify WASM web build
+        run: |
+          export PATH="/usr/local/bin:$PATH"
+          # wasm-check expects artifacts under ../build relative to repo when run from tests/
+          # Mirror CircleCI layout: run from repo root with build/ symlink
+          ln -sfn build-web build
+          ./tests/wasm-check.sh web
+      - name: Package artifacts
+        run: |
+          mkdir -p artifacts
+          cd build-web
+          zip -9r ../artifacts/OpenSCAD-WebAssembly-web.zip openscad.*
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenSCAD-WebAssembly-web
+          path: artifacts/OpenSCAD-WebAssembly-web.zip

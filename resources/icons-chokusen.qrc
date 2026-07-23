@@ -30,10 +30,13 @@
     <file>icons/chokusen/svg/chokusen-measure-angle.svg</file>
     <file>icons/chokusen/svg/chokusen-measure-distance.svg</file>
     <file>icons/chokusen/svg/chokusen-new.svg</file>
+    <file>icons/chokusen/svg/chokusen-next.svg</file>
     <file>icons/chokusen/svg/chokusen-open.svg</file>
     <file>icons/chokusen/svg/chokusen-orthogonal.svg</file>
+    <file>icons/chokusen/svg/chokusen-paper-clip.svg</file>
     <file>icons/chokusen/svg/chokusen-parameter.svg</file>
     <file>icons/chokusen/svg/chokusen-perspective.svg</file>
+    <file>icons/chokusen/svg/chokusen-prev.svg</file>
     <file>icons/chokusen/svg/chokusen-preview.svg</file>
     <file>icons/chokusen/svg/chokusen-redo.svg</file>
     <file>icons/chokusen/svg/chokusen-remove.svg</file>
@@ -47,6 +50,7 @@
     <file>icons/chokusen/svg/chokusen-throwntogether.svg</file>
     <file>icons/chokusen/svg/chokusen-undo.svg</file>
     <file>icons/chokusen/svg/chokusen-unindent.svg</file>
+    <file>icons/chokusen/svg/chokusen-untitled.svg</file>
     <file>icons/chokusen/svg/chokusen-up.svg</file>
     <file>icons/chokusen/svg/chokusen-vcr-control-end.svg</file>
     <file>icons/chokusen/svg/chokusen-vcr-control-pause.svg</file>
