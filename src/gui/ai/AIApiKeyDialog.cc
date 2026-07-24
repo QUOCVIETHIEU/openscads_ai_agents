@@ -13,7 +13,7 @@
 
 AIApiKeyDialog::AIApiKeyDialog(QWidget *parent) : QDialog(parent)
 {
-  setWindowTitle(_("AI Settings"));
+  setWindowTitle(_("Custom API Key Config"));
   setModal(true);
   setWindowFlag(Qt::WindowContextHelpButtonHint, false);
   setMinimumWidth(930);
@@ -70,7 +70,7 @@ int AIApiKeyDialog::prompt(QWidget *parent)
 void AIApiKeyDialog::onSave()
 {
   if (!panel || !panel->saveAll()) {
-    QMessageBox::warning(this, _("AI Settings"), _("Could not save AI settings."));
+    QMessageBox::warning(this, _("Custom API Key Config"), _("Could not save AI settings."));
     return;
   }
   accept();

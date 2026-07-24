@@ -1372,6 +1372,7 @@ set(GUI_SOURCES
   src/gui/ai/ChatInputEdit.cc
   src/gui/ai/AISettingsPanel.cc
   src/gui/ai/AIApiKeyDialog.cc
+  src/gui/ai/FreeApiKeysDialog.cc
   ${INPUT_DRIVER_SOURCES}
   )
 
@@ -1449,6 +1450,7 @@ set(GUI_HEADERS
     src/gui/ai/ChatInputEdit.h
     src/gui/ai/AISettingsPanel.h
     src/gui/ai/AIApiKeyDialog.h
+    src/gui/ai/FreeApiKeysDialog.h
 )
 
 # To be added in Source for QtCreator to show them in project tree
@@ -1545,6 +1547,7 @@ else()
   list(APPEND RESOURCE_FILES
     ${RESOURCE_DIR}/common.qrc
     ${RESOURCE_DIR}/icons-chokusen.qrc
+    ${RESOURCE_DIR}/icons-ai-brands.qrc
     ${RESOURCE_DIR}/icons-chokusen-dark.qrc
   )
   # GUI_UIS for .ui files to be indexed by Qt Creator despite AUTOUIC usage

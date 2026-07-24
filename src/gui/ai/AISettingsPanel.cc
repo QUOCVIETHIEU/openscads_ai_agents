@@ -219,7 +219,7 @@ void AISettingsPanel::buildUi()
 
   auto *titleCol = new QVBoxLayout();
   titleCol->setSpacing(1);
-  titleLabel = new QLabel(_("AI Settings"), this);
+  titleLabel = new QLabel(_("Custom API Key Config"), this);
   QFont titleFont = titleLabel->font();
   titleFont.setPointSize(titleFont.pointSize() + 2);
   titleFont.setBold(true);

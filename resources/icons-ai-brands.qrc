@@ -1,0 +1,13 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource prefix="/">
+    <file>icons/ai-brands/cerebras.svg</file>
+    <file>icons/ai-brands/gemini.svg</file>
+    <file>icons/ai-brands/google.svg</file>
+    <file>icons/ai-brands/groq.svg</file>
+    <file>icons/ai-brands/mistralai.svg</file>
+    <file>icons/ai-brands/nvidia.svg</file>
+    <file>icons/ai-brands/openai.svg</file>
+    <file>icons/ai-brands/openrouter.svg</file>
+  </qresource>
+</RCC>

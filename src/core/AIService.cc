@@ -144,14 +144,13 @@ static bool stripLegacyDefaultLimits(nlohmann::json& params)
   return changed;
 }
 
-static bool loadActiveProfile(AIProfileConfig& config, std::string& error_msg,
-                              const std::string& profileOverride = "")
+static bool loadActiveProfile(AIProfileConfig& config, std::string& error_msg)
 {
   const std::string path = getAISettingsPath();
   std::ifstream file(path);
   nlohmann::json j;
   if (!file.is_open()) {
-    // First run: seed free agent presets so Settings + Chat have something to pick.
+    // First run: seed a Default profile so Settings + Chat have something to use.
     j = nlohmann::json::object();
     AIFreeAgents::ensurePresets(j);
     std::ofstream out(path);
@@ -179,14 +178,11 @@ static bool loadActiveProfile(AIProfileConfig& config, std::string& error_msg,
   }
   auto& profiles = j["profiles"];
 
-  std::string active_profile_name = profileOverride;
-  if (active_profile_name.empty()) {
-    if (!j.contains("activeProfile") || !j["activeProfile"].is_string()) {
-      error_msg = "ai_settings.json is missing 'activeProfile' string.";
-      return false;
-    }
-    active_profile_name = j["activeProfile"].get<std::string>();
+  if (!j.contains("activeProfile") || !j["activeProfile"].is_string()) {
+    error_msg = "ai_settings.json is missing 'activeProfile' string.";
+    return false;
   }
+  const std::string active_profile_name = j["activeProfile"].get<std::string>();
 
   if (!profiles.contains(active_profile_name) || !profiles[active_profile_name].is_object()) {
     error_msg = "Active profile '" + active_profile_name + "' was not found in 'profiles'.";
@@ -219,8 +215,6 @@ public:
   std::unique_ptr<HTTPClient> http_client;
   std::unique_ptr<AIClient> ai_client;
   ToolExecutor tool_executor = nullptr;
-  // Empty = Settings activeProfile; set for the duration of a chat turn (incl. tool recursion).
-  std::string turnProfileOverride;
 
   Impl()
   {
@@ -249,22 +243,12 @@ void AIService::registerToolExecutor(ToolExecutor executor)
   impl->tool_executor = std::move(executor);
 }
 
-void AIService::setTurnProfileOverride(const std::string& profileName)
-{
-  impl->turnProfileOverride = profileName;
-}
-
-void AIService::clearTurnProfileOverride()
-{
-  impl->turnProfileOverride.clear();
-}
-
 void AIService::chatCompletionStream(std::vector<ChatMessage>& history, ChunkCallback on_chunk,
                                      ErrorCallback on_error, CompleteCallback on_complete)
 {
   AIProfileConfig config;
   std::string error_msg;
-  if (!loadActiveProfile(config, error_msg, impl->turnProfileOverride)) {
+  if (!loadActiveProfile(config, error_msg)) {
     if (on_error) {
       on_error(error_msg);
     }
@@ -434,15 +418,12 @@ std::string AIService::getDefaultPrompt() const
 void AIService::cancelPendingRequests()
 {
   impl->ai_client->cancelPendingRequests();
-  impl->turnProfileOverride.clear();
 }
 
 #else  // __EMSCRIPTEN__
 
 class AIService::Impl
 {
-public:
-  std::string turnProfileOverride;
 };
 
 AIService::AIService() : impl(std::make_unique<Impl>())
@@ -452,9 +433,6 @@ AIService::~AIService() = default;
 
 AIService::AIService(AIService&&) noexcept = default;
 AIService& AIService::operator=(AIService&&) noexcept = default;
-
-void AIService::setTurnProfileOverride(const std::string&) {}
-void AIService::clearTurnProfileOverride() {}
 
 void AIService::chatCompletionStream(std::vector<ChatMessage>&, ChunkCallback, ErrorCallback on_error,
                                      CompleteCallback)

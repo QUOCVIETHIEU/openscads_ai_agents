@@ -59,29 +59,15 @@ bool loadSettingsJson(nlohmann::json& j, std::string& errorMsg)
   return true;
 }
 
-bool saveSettingsJson(const nlohmann::json& j, std::string& errorMsg)
-{
-  const std::string path = settingsPath();
-  std::ofstream out(path);
-  if (!out.is_open()) {
-    errorMsg = "Could not write ai_settings.json";
-    return false;
-  }
-  out << j.dump(4);
-  return true;
-}
-
-nlohmann::json makePreset(const char *endpoint, const char *model, const char *tierNote)
+nlohmann::json makeEmptyDefaultProfile()
 {
   nlohmann::json profile = nlohmann::json::object();
-  profile["endpoint"] = endpoint;
+  profile["endpoint"] = "https://generativelanguage.googleapis.com/v1beta/openai";
   profile["apiKey"] = "";
   nlohmann::json params = nlohmann::json::object();
-  params["model"] = model;
+  params["model"] = "gemini-3.1-flash-lite";
   params["system_prompt"] = AIService::defaultSystemPrompt();
   params["default_prompt"] = "";
-  params["tier"] = "free";
-  params["tier_note"] = tierNote;
   profile["params"] = params;
   return profile;
 }
@@ -99,57 +85,25 @@ bool ensurePresets(nlohmann::json& settings)
   auto& profiles = settings["profiles"];
   bool changed = false;
 
-  struct Preset {
-    const char *name;
-    const char *endpoint;
-    const char *model;
-    const char *note;
-  };
-
-  // Official free tiers (user pastes a free key once — except Ollama).
-  const Preset presets[] = {
-    {"Gemini Free", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash",
-     "Free via Google AI Studio (aistudio.google.com). Rate-limited."},
-    {"Groq Free", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile",
-     "Free via console.groq.com. Fast open models; rate-limited."},
-    {"OpenRouter Free", "https://openrouter.ai/api/v1", "openrouter/free",
-     "Free via openrouter.ai — auto-picks a free model. Rate-limited."},
-    {"Ollama Local", "http://localhost:11434/v1", "llama3.2",
-     "Fully local — no API key. Install Ollama and pull a model first."},
-  };
-
-  for (const auto& p : presets) {
-    if (profiles.contains(p.name)) continue;
-    profiles[p.name] = makePreset(p.endpoint, p.model, p.note);
-    changed = true;
-  }
-
-  // Keep a Default alias for first-run installs that already expect it.
-  if (!profiles.contains("Default")) {
-    profiles["Default"] = makePreset("https://generativelanguage.googleapis.com/v1beta/openai",
-                                     "gemini-2.0-flash",
-                                     "Alias of Gemini Free. Paste a free Google AI Studio key.");
+  if (!profiles.contains("Default") || !profiles["Default"].is_object()) {
+    profiles["Default"] = makeEmptyDefaultProfile();
     changed = true;
   }
 
   if (!settings.contains("activeProfile") || !settings["activeProfile"].is_string() ||
       settings["activeProfile"].get<std::string>().empty() ||
       !profiles.contains(settings["activeProfile"].get<std::string>())) {
-    settings["activeProfile"] = profiles.contains("Gemini Free") ? "Gemini Free" : "Default";
+    settings["activeProfile"] = profiles.contains("Default") ? "Default"
+                                                             : profiles.begin().key();
     changed = true;
   }
 
   return changed;
 }
 
-std::vector<std::string> freePresetNames()
+bool requiresApiKey(const std::string& /*profileName*/)
 {
-  return {"Gemini Free", "Groq Free", "OpenRouter Free", "Ollama Local"};
-}
-
-bool requiresApiKey(const std::string& profileName)
-{
-  return profileName != "Ollama Local";
+  return true;
 }
 
 std::string readProfileApiKey(const std::string& profileName)
@@ -162,19 +116,6 @@ std::string readProfileApiKey(const std::string& profileName)
   return j["profiles"][profileName].value("apiKey", "");
 }
 
-bool writeProfileApiKey(const std::string& profileName, const std::string& apiKey, std::string& errorMsg)
-{
-  nlohmann::json j;
-  if (!loadSettingsJson(j, errorMsg)) return false;
-  if (!j.contains("profiles") || !j["profiles"].is_object() || !j["profiles"].contains(profileName) ||
-      !j["profiles"][profileName].is_object()) {
-    errorMsg = "Profile '" + profileName + "' was not found.";
-    return false;
-  }
-  j["profiles"][profileName]["apiKey"] = apiKey;
-  return saveSettingsJson(j, errorMsg);
-}
-
 std::string activeProfileName()
 {
   nlohmann::json j;
@@ -184,23 +125,9 @@ std::string activeProfileName()
   return j["activeProfile"].get<std::string>();
 }
 
-std::string apiKeySignupHint(const std::string& profileName)
-{
-  if (profileName.find("Groq") != std::string::npos) {
-    return "Create a free key at https://console.groq.com/keys";
-  }
-  if (profileName.find("Gemini") != std::string::npos) {
-    return "Create a free key at https://aistudio.google.com/apikey";
-  }
-  if (profileName.find("OpenRouter") != std::string::npos) {
-    return "Create a free key at https://openrouter.ai/keys";
-  }
-  return "Paste the provider API key in AI Settings for this agent.";
-}
-
 bool isLimitError(int statusCode, const std::string& responseBody)
 {
-  if (statusCode == 429) return true;
+  if (statusCode == 429 || statusCode == 402) return true;
   const std::string lower = toLower(responseBody);
   static const char *kNeedles[] = {
     "rate limit",
@@ -212,6 +139,8 @@ bool isLimitError(int statusCode, const std::string& responseBody)
     "too many requests",
     "exceeded your current quota",
     "insufficient_quota",
+    "payment_required",
+    "payment required",
     "daily limit",
     "monthly limit",
     "tokens per day",
@@ -245,19 +174,16 @@ std::string formatHttpError(int statusCode, const std::string& responseBody)
 
   if (isLimitError(statusCode, responseBody)) {
     return std::string(
-             "Free limit reached — this free agent is temporarily limited.\n"
-             "Wait a bit and retry, switch to another free agent (Groq / OpenRouter / Ollama), "
-             "or add/upgrade your API key in AI Settings.\n\n"
+             "API limit reached — this profile is temporarily limited.\n"
+             "Wait a bit and retry, or open AI Settings and switch profile / API key.\n\n"
              "HTTP ") +
            std::to_string(statusCode) + ": " + detail;
   }
 
   if (isAuthError(statusCode, responseBody)) {
     return std::string(
-             "API key missing or invalid for this agent.\n"
-             "Agents menu → Open AI Settings… → select the agent → paste its API key.\n"
-             "Free keys: console.groq.com/keys · aistudio.google.com/apikey · openrouter.ai/keys\n"
-             "Ollama Local needs no key.\n\n"
+             "API key missing or invalid.\n"
+             "Open AI Settings and paste a valid API key for the active profile.\n\n"
              "HTTP ") +
            std::to_string(statusCode) + ": " + detail;
   }
