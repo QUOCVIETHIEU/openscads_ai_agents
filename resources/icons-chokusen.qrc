@@ -2,6 +2,7 @@
   <qresource>
     <file>icons/chokusen/index.theme</file>
     <file>icons/chokusen/svg/chokusen-add.svg</file>
+    <file>icons/chokusen/svg/chokusen-agent.svg</file>
     <file>icons/chokusen/svg/chokusen-ai-setting.svg</file>
     <file>icons/chokusen/svg/chokusen-animate-disabled.svg</file>
     <file>icons/chokusen/svg/chokusen-animate-pause.svg</file>

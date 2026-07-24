@@ -1059,6 +1059,7 @@ set(CORE_SOURCES
   src/core/HTTPClient.cc
   src/core/AIClient.cc
   src/core/AIService.cc
+  src/core/AIFreeAgents.cc
   src/core/customizer/Annotation.cc
   src/core/customizer/CommentParser.cc
   src/core/customizer/ParameterObject.cc

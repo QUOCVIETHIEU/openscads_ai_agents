@@ -95,6 +95,12 @@ private:
   void setupCursorComposer();
   void setupCursorHeader();
   void updateComposerActionButton();
+  void updateAgentButton();
+  void showAgentPicker();
+  void selectComposerAgent(const QString& id);
+  bool ensureComposerAgentApiKey();
+  void applyComposerAgentOverride();
+  void clearComposerAgentOverride();
   void enableInput(bool enabled);
   void setUserEditButtonsEnabled(bool enabled);
   void stopActiveRequest(bool keepPartialAssistant);
@@ -127,13 +133,14 @@ private:
   int expandedDockWidth = 320;
 
   QPushButton *attachButton = nullptr;
+  QPushButton *agentButton = nullptr;
   QPushButton *historyButton = nullptr;
   QPushButton *clearChatButton = nullptr;
-  QPushButton *settingsButton = nullptr;
   QPushButton *layoutButton = nullptr;
 
   QWidget *attachmentStrip = nullptr;
   QHBoxLayout *attachmentStripLayout = nullptr;
   QList<QImage> pendingImages;
+  QString composerAgentId = QStringLiteral("__api_key__");
   static constexpr int kMaxAttachments = 4;
 };

@@ -1,5 +1,6 @@
 #include "gui/ai/AISettingsPanel.h"
 
+#include "core/AIFreeAgents.h"
 #include "core/AIService.h"
 #include "gui/Preferences.h"
 #include "gui/qtgettext.h"
@@ -705,6 +706,9 @@ void AISettingsPanel::loadSettings()
   if (migrateLegacyDefaultLimits(settings)) {
     writeSettingsFile(settings);
   }
+  if (AIFreeAgents::ensurePresets(settings)) {
+    writeSettingsFile(settings);
+  }
 
   profileCombo->clear();
   QStringList names;
@@ -713,17 +717,13 @@ void AISettingsPanel::loadSettings()
   }
   names.sort(Qt::CaseInsensitive);
   if (names.isEmpty()) {
-    names.append(QStringLiteral("Default"));
-    nlohmann::json profile = nlohmann::json::object();
-    profile["endpoint"] = "https://generativelanguage.googleapis.com/v1beta/openai";
-    profile["apiKey"] = "";
-    nlohmann::json params = nlohmann::json::object();
-    params["model"] = "gemini-2.0-flash";
-    params["system_prompt"] = defaultSystemPrompt().toStdString();
-    params["default_prompt"] = "";
-    profile["params"] = params;
-    settings["profiles"]["Default"] = profile;
-    settings["activeProfile"] = "Default";
+    // ensurePresets should have seeded; keep a hard fallback
+    AIFreeAgents::ensurePresets(settings);
+    writeSettingsFile(settings);
+    for (auto it = settings["profiles"].begin(); it != settings["profiles"].end(); ++it) {
+      names.append(QString::fromStdString(it.key()));
+    }
+    names.sort(Qt::CaseInsensitive);
   }
 
   for (const auto& name : names) {
@@ -789,12 +789,34 @@ void AISettingsPanel::loadProfile(const QString& profileName)
   systemPromptEdit->setPlainText(systemPrompt);
   defaultPromptEdit->setPlainText(defaultPrompt);
 
+  const QString tierNote = QString::fromStdString(params.value("tier_note", ""));
+  const bool isFree = params.value("tier", "") == "free" ||
+                      profileName.contains(QStringLiteral("Free"), Qt::CaseInsensitive) ||
+                      profileName.contains(QStringLiteral("Ollama"), Qt::CaseInsensitive);
+  if (hintLabel) {
+    if (!tierNote.isEmpty()) {
+      hintLabel->setText(tierNote);
+    } else if (isFree) {
+      hintLabel->setText(_("Free agent preset — paste a free API key (Ollama needs none)."));
+    } else {
+      hintLabel->setText(_("Connection, prompts, and model parameters."));
+    }
+  }
+  if (isFree && profileName.contains(QStringLiteral("Ollama"), Qt::CaseInsensitive)) {
+    apiKeyEdit->setPlaceholderText(_("No API key needed for Ollama"));
+  } else if (isFree) {
+    apiKeyEdit->setPlaceholderText(_("Paste free API key from the provider signup page"));
+  } else {
+    apiKeyEdit->setPlaceholderText(_("Paste your API key"));
+  }
+
   clearParamRows();
   QStringList keys;
   for (auto it = params.begin(); it != params.end(); ++it) {
     const QString key = QString::fromStdString(it.key());
     if (key == QStringLiteral("system_prompt") || key == QStringLiteral("default_prompt") ||
-        key == QStringLiteral("model")) {
+        key == QStringLiteral("model") || key == QStringLiteral("tier") ||
+        key == QStringLiteral("tier_note")) {
       continue;
     }
     keys.append(key);
@@ -821,6 +843,17 @@ bool AISettingsPanel::collectProfileIntoJson(nlohmann::json& profileObj) const
   profileObj["apiKey"] = apiKeyEdit->text().trimmed().toStdString();
 
   nlohmann::json params = nlohmann::json::object();
+  // Preserve free-tier metadata when switching/saving profiles
+  if (!currentProfile.isEmpty() && settings.contains("profiles") &&
+      settings["profiles"].contains(currentProfile.toStdString())) {
+    const auto& prev = settings["profiles"][currentProfile.toStdString()];
+    if (prev.contains("params") && prev["params"].is_object()) {
+      const auto& prevParams = prev["params"];
+      if (prevParams.contains("tier")) params["tier"] = prevParams["tier"];
+      if (prevParams.contains("tier_note")) params["tier_note"] = prevParams["tier_note"];
+    }
+  }
+
   params["system_prompt"] = systemPromptEdit->toPlainText().toStdString();
   params["default_prompt"] = defaultPromptEdit->toPlainText().toStdString();
 
@@ -836,7 +869,8 @@ bool AISettingsPanel::collectProfileIntoJson(nlohmann::json& profileObj) const
     if (!row.keyEdit || !row.valueEdit) continue;
     const QString key = row.keyEdit->text().trimmed();
     if (key.isEmpty() || key == QStringLiteral("system_prompt") ||
-        key == QStringLiteral("default_prompt") || key == QStringLiteral("model")) {
+        key == QStringLiteral("default_prompt") || key == QStringLiteral("model") ||
+        key == QStringLiteral("tier") || key == QStringLiteral("tier_note")) {
       continue;
     }
     const QString valText = row.valueEdit->text().trimmed();

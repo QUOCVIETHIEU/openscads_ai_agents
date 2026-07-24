@@ -1,5 +1,6 @@
 #include "AIClient.h"
 #include "HTTPClient.h"
+#include "core/AIFreeAgents.h"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -431,7 +432,7 @@ void AIClient::sendChatCompletion(const AIProfileConfig& config,
         }
       } else {
         if (on_error) {
-          on_error("HTTP status " + std::to_string(status_code) + ": " + response_body);
+          on_error(AIFreeAgents::formatHttpError(status_code, response_body));
         }
       }
     },
@@ -481,7 +482,7 @@ void AIClient::sendChatCompletionStream(const AIProfileConfig& config,
     [parser, on_complete, on_error, error_body, error_status]() {
       if (*error_status != 0) {
         if (on_error) {
-          on_error("HTTP status " + std::to_string(*error_status) + ": " + *error_body);
+          on_error(AIFreeAgents::formatHttpError(*error_status, *error_body));
         }
         return;
       }

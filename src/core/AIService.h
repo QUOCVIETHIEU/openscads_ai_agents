@@ -49,6 +49,10 @@ public:
   // Cancel any active AI completion requests
   void cancelPendingRequests();
 
+  // Chat composer: empty = use Settings activeProfile; otherwise use named profile for this turn.
+  void setTurnProfileOverride(const std::string& profileName);
+  void clearTurnProfileOverride();
+
   using ToolExecutor =
     std::function<std::string(const std::string& name, const std::string& arguments_json)>;
   void registerToolExecutor(ToolExecutor executor);
