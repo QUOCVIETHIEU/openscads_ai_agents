@@ -28,6 +28,7 @@
 #include <QUrl>
 #include <QWidget>
 #include <ctime>
+#include <functional>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -295,6 +296,8 @@ private slots:
   void instantiateRoot();
   void compileDone(bool didchange);
   void compileEnded();
+  /*! Clear 3D view + cached geometry (used when rendering empty editor / no geometry). */
+  void clearViewportGeometry();
 
 private slots:
   void on_editActionCopyVPT_triggered();
@@ -360,6 +363,9 @@ protected:
 public slots:
   void actionRenderPreview();
   void on_designActionPreview_triggered();
+  /*! Full F6 render for AI turns; invokes onComplete once when compile/render ends. */
+  void startAIFullRender(std::function<void()> onComplete);
+  void cancelAIFullRenderCallback();
 private slots:
   void csgRender();
   void csgReloadRender();
@@ -494,6 +500,7 @@ private:
 
   QMenu *navigationMenu{nullptr};
   QSoundEffect *renderCompleteSoundEffect;
+  std::function<void()> aiRenderCompleteCallback;
   std::vector<std::unique_ptr<QTemporaryFile>> allTempFiles;
 
   void resetMeasurementsState(bool enable, const QString& tooltipMessage);

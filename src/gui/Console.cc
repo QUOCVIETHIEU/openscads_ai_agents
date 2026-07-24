@@ -33,6 +33,9 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFocusEvent>
+#include <QFont>
+#include <QFontDatabase>
+#include <QFontInfo>
 #include <QFrame>
 #include <QMenu>
 #include <QPalette>
@@ -52,6 +55,52 @@
 #include "gui/Preferences.h"
 #include "gui/UIUtils.h"
 #include "utils/printutils.h"
+
+namespace {
+
+/*! Prefer VS Code terminal fonts (SF Mono / Menlo on macOS). */
+QString resolveConsoleFontFamily(const QString& configured)
+{
+  if (!configured.isEmpty()) {
+    const QFont configuredFont(configured);
+    const QFontInfo info(configuredFont);
+    if (info.fixedPitch()) {
+      return info.family();
+    }
+  }
+
+  const QStringList candidates = {
+#ifdef Q_OS_MACOS
+    QStringLiteral("SF Mono"),
+    QStringLiteral("Menlo"),
+    QStringLiteral("Monaco"),
+#elif defined(Q_OS_WIN)
+    QStringLiteral("Cascadia Mono"),
+    QStringLiteral("Consolas"),
+#else
+    QStringLiteral("JetBrains Mono"),
+    QStringLiteral("Fira Code"),
+    QStringLiteral("DejaVu Sans Mono"),
+    QStringLiteral("Liberation Mono"),
+    QStringLiteral("Noto Sans Mono"),
+#endif
+    QStringLiteral("Courier New"),
+  };
+
+  for (const QString& name : candidates) {
+    if (!QFontDatabase::hasFamily(name)) {
+      continue;
+    }
+    const QFontInfo info{QFont(name)};
+    if (info.fixedPitch() || info.family().contains(name, Qt::CaseInsensitive)) {
+      return info.family();
+    }
+  }
+
+  return QFontInfo(QFontDatabase::systemFont(QFontDatabase::FixedFont)).family();
+}
+
+}  // namespace
 
 Console::Console(QWidget *parent) : QPlainTextEdit(parent)
 {
@@ -140,10 +189,21 @@ void Console::setConsoleFont(const QString& fontFamily, uint ptSize)
   const QString bg = dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8");
   const QString fg = dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333");
   const QString sel = dark ? QStringLiteral("#264f78") : QStringLiteral("#add6ff");
+  const QString family = resolveConsoleFontFamily(fontFamily);
+  // Compact VS Code terminal: slightly smaller than editor, light stroke
+  const uint size = ptSize > 0 ? ptSize : 11;
+  QFont font(family, static_cast<int>(size));
+  font.setStyleHint(QFont::Monospace);
+  font.setFixedPitch(true);
+  font.setWeight(QFont::Light);
+  this->setFont(font);
+  this->document()->setDefaultFont(font);
+
   const auto stylesheet = QStringLiteral(R"(
     QPlainTextEdit {
-      font-family: '%1';
+      font-family: "%1";
       font-size: %2pt;
+      font-weight: 300;
       background: %3;
       color: %4;
       border: none;
@@ -151,7 +211,7 @@ void Console::setConsoleFont(const QString& fontFamily, uint ptSize)
       padding: 4px 8px;
     }
   )");
-  this->setStyleSheet(stylesheet.arg(fontFamily, QString::number(ptSize), bg, fg, sel));
+  this->setStyleSheet(stylesheet.arg(family, QString::number(size), bg, fg, sel));
 }
 
 void Console::update()

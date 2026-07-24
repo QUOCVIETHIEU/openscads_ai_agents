@@ -967,6 +967,39 @@ void MainWindow::compileEnded()
 #ifdef ENABLE_GUI_TESTS
   emit compilationDone(this->rootFile.get());
 #endif
+  if (aiRenderCompleteCallback) {
+    auto cb = std::move(aiRenderCompleteCallback);
+    aiRenderCompleteCallback = nullptr;
+    // Defer so unlock/status updates settle before the AI turn finishes its UI.
+    QTimer::singleShot(0, this, [cb = std::move(cb)]() { cb(); });
+  }
+}
+
+void MainWindow::startAIFullRender(std::function<void()> onComplete)
+{
+  cancelAIFullRenderCallback();
+  aiRenderCompleteCallback = std::move(onComplete);
+
+  auto startRender = [this]() {
+    if (GuiLocker::isLocked()) {
+      // Another compile is in progress; finish the AI turn without hanging.
+      if (aiRenderCompleteCallback) {
+        auto cb = std::move(aiRenderCompleteCallback);
+        aiRenderCompleteCallback = nullptr;
+        QTimer::singleShot(0, this, [cb = std::move(cb)]() { cb(); });
+      }
+      return;
+    }
+    on_designActionRender_triggered();
+  };
+
+  // Let the editor apply text + layout settle before locking the GUI for F6.
+  QTimer::singleShot(0, this, startRender);
+}
+
+void MainWindow::cancelAIFullRenderCallback()
+{
+  aiRenderCompleteCallback = nullptr;
 }
 
 #ifdef ENABLE_GUI_TESTS
@@ -1919,7 +1952,22 @@ void MainWindow::actionRenderPreview()
 
 void MainWindow::csgRender()
 {
-  if (this->rootNode) compileCSG();
+  if (isEmpty() || !this->rootNode) {
+    clearViewportGeometry();
+    if (isEmpty()) {
+      LOG("Editor is empty — viewport cleared.");
+    } else {
+      LOG(message_group::UI_Warning, "No top level geometry to preview");
+    }
+    if (activeEditor) {
+      activeEditor->contentsRendered = true;
+      renderedEditor = activeEditor;
+    }
+    compileEnded();
+    return;
+  }
+
+  compileCSG();
 
   // Go to non-CGAL view mode
   if (viewActionThrownTogether->isChecked()) {
@@ -2016,7 +2064,17 @@ void MainWindow::on_designActionRender_triggered()
 
 void MainWindow::cgalRender()
 {
-  if (!this->rootFile || !this->rootNode) {
+  if (isEmpty() || !this->rootFile || !this->rootNode) {
+    clearViewportGeometry();
+    if (isEmpty()) {
+      LOG("Editor is empty — viewport cleared.");
+    } else {
+      LOG(message_group::UI_Warning, "No top level geometry to render");
+    }
+    if (activeEditor) {
+      activeEditor->contentsRendered = true;
+      renderedEditor = activeEditor;
+    }
     compileEnded();
     return;
   }
@@ -2035,6 +2093,31 @@ void MainWindow::cgalRender()
   else return;
 
   this->cgalworker->start(this->tree);
+}
+
+void MainWindow::clearViewportGeometry()
+{
+  if (this->qglview) {
+    this->qglview->setRenderer(nullptr);
+  }
+#ifdef ENABLE_OPENCSG
+  this->previewRenderer = nullptr;
+#endif
+  this->thrownTogetherRenderer = nullptr;
+  this->geomRenderer = nullptr;
+  this->rootGeom.reset();
+  this->absoluteRootNode.reset();
+  this->csgRoot.reset();
+  this->normalizedRoot.reset();
+  this->rootProduct.reset();
+  this->highlightsProducts.reset();
+  this->backgroundProducts.reset();
+  this->rootNode.reset();
+  this->tree.setRoot(nullptr);
+  resetMeasurementsState(false, "No top level geometry; render something to enable measurements");
+  if (this->qglview) {
+    this->qglview->update();
+  }
 }
 
 void MainWindow::actionRenderDone(const std::shared_ptr<const Geometry>& root_geom)
@@ -3780,19 +3863,23 @@ void MainWindow::setupConsole()
   QObject::connect(consoleDock, &Dock::visibilityChanged, this,
                    &MainWindow::onConsoleDockVisibilityChanged);
 
-  this->console->setConsoleFont(
-    GlobalPreferences::inst()->getValue("advanced/consoleFontFamily").toString(),
-    GlobalPreferences::inst()->getValue("advanced/consoleFontSize").toUInt());
-
-  consoleOutputRaw(
-    QString("<b>OpenSCAD %1</b>").arg(QString::fromStdString(std::string(openscad_versionnumber))));
-  consoleOutputRaw(QString("<a href=\"https://www.openscad.org/\">https://www.openscad.org/</a><br>"));
-  consoleOutputRaw(
-    QString("<p>Copyright (C) 2009-2026 The OpenSCAD Developers</p>"
-            "<p>This program is free software; you can redistribute it and/or modify "
-            "it under the terms of the GNU General Public License as published by "
-            "the Free Software Foundation; either version 2 of the License, or "
-            "(at your option) any later version.</p>"));
+  // Prefer a compact, light terminal face (one-shot migrate prior 12pt default → 11)
+  {
+    QSettingsCached settings;
+    uint consoleSize = GlobalPreferences::inst()->getValue("advanced/consoleFontSize").toUInt();
+    if (!settings.value("advanced/consoleFontCompacted", false).toBool()) {
+      if (consoleSize == 0 || consoleSize == 12) {
+        consoleSize = 11;
+        settings.setValue("advanced/consoleFontSize", consoleSize);
+      }
+      settings.setValue("advanced/consoleFontCompacted", true);
+    }
+    if (consoleSize == 0) {
+      consoleSize = 11;
+    }
+    this->console->setConsoleFont(
+      GlobalPreferences::inst()->getValue("advanced/consoleFontFamily").toString(), consoleSize);
+  }
 }
 
 /**
@@ -4698,9 +4785,9 @@ void MainWindow::setupMenusAndActions()
 void MainWindow::restoreWindowState()
 {
   QSettingsCached settings;
-  // v2: AI-first side chat layout. v3: Console visible by default.
-  // v4: VS Code-style bottom panel header (Console / Error Log tabs + actions).
-  constexpr int kAiFirstLayoutVersion = 4;
+  // v2: AI-first side chat. v3: Console default visible.
+  // v4: VS Code bottom panel header. v5: center-only console (L/R full height).
+  constexpr int kAiFirstLayoutVersion = 5;
   const int layoutVersion = settings.value("window/layoutVersion", 0).toInt();
   const bool forceAiFirstLayout = layoutVersion < kAiFirstLayoutVersion;
 
@@ -4728,20 +4815,19 @@ void MainWindow::restoreWindowState()
 
   if (windowState.size() == 0) {
     /*
-     * This triggers only in case the configuration file has no
-     * window state information (or no configuration file at all).
-     * When this happens, the editor would default to a very ugly
-     * width due to the dock widget layout. This overwrites the
-     * value reported via sizeHint() to a width a bit smaller than
-     * half the main window size (either the one loaded from the
-     * configuration or the default value of 800).
-     * The height is only a dummy value which will be essentially
-     * ignored by the layouting as the editor is set to expand to
-     * fill the available space.
+     * Default AI-first / VS Code workbench:
+     *   Left  = Editor (full height)
+     *   Right = AI chat (full height)
+     *   Center top    = 3D preview (central widget)
+     *   Center bottom = Console/log (only between L/R, not full width)
      */
-    activeEditor->setInitialSizeHint(QSize((5 * this->width() / 11), 100));
+    addDockWidget(Qt::LeftDockWidgetArea, editorDock);
+    if (this->aiDock) {
+      addDockWidget(Qt::RightDockWidgetArea, this->aiDock);
+    }
     addDockWidget(Qt::BottomDockWidgetArea, consoleDock);
-    // Other utility docks stay available via Window menu (not tabbed into Console)
+
+    // Utility docks stay available via Window menu (not in the main 3-column layout)
     tabifyDockWidget(fontListDock, colorListDock);
     tabifyDockWidget(colorListDock, animateDock);
     tabifyDockWidget(animateDock, viewportControlDock);
@@ -4751,13 +4837,35 @@ void MainWindow::restoreWindowState()
     animateDock->hide();
     viewportControlDock->hide();
 
-    // VS Code-style: Console panel visible at the bottom by default
+    editorDock->show();
+    editorDock->raise();
     consoleDock->show();
     consoleDock->raise();
     if (bottomPanelHeader) {
       bottomPanelHeader->setActiveTab(BottomPanelHeader::ConsoleTab);
     }
+
+    const int winW = std::max(1000, this->width());
+    const int editorW = std::max(320, (5 * winW) / 11);
+    const int aiW = std::max(280, winW / 4);
+    activeEditor->setInitialSizeHint(QSize(editorW, 100));
+    resizeDocks({editorDock}, {editorW}, Qt::Horizontal);
+    if (this->aiDock) {
+      resizeDocks({this->aiDock}, {aiW}, Qt::Horizontal);
+    }
     resizeDocks({consoleDock}, {160}, Qt::Vertical);
+    // Dock sizes are more reliable after the window is shown
+    QTimer::singleShot(0, this, [this, editorW, aiW]() {
+      if (editorDock && editorDock->isVisible()) {
+        resizeDocks({editorDock}, {editorW}, Qt::Horizontal);
+      }
+      if (aiDock && aiDock->isVisible()) {
+        resizeDocks({aiDock}, {aiW}, Qt::Horizontal);
+      }
+      if (consoleDock && consoleDock->isVisible()) {
+        resizeDocks({consoleDock}, {160}, Qt::Vertical);
+      }
+    });
 
     // AI-first migration: enable AI features and show the chat dock
     if (forceAiFirstLayout) {

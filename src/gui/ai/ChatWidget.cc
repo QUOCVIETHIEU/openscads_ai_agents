@@ -630,28 +630,48 @@ void ChatWidget::onSendPressed()
     [this, alive]() {
       QMetaObject::invokeMethod(qApp, [this, alive]() {
         if (!*alive || !isRequestRunning) return;
-        if (activeResponseText && activeResponseText->empty()) {
-          if (activeAIBubble) {
-            scrollLayout->removeWidget(activeAIBubble);
-            delete activeAIBubble;
-            activeAIBubble = nullptr;
+
+        // Hold the final chat reply + unlock until F6 render finishes so code,
+        // chat response, and rendered geometry (exportable) land together.
+        const bool needRender = pendingPreviewRender;
+        pendingPreviewRender = false;
+
+        auto finishTurn = [this, alive]() {
+          if (!*alive) return;
+          if (activeResponseText && activeResponseText->empty()) {
+            if (activeAIBubble) {
+              scrollLayout->removeWidget(activeAIBubble);
+              delete activeAIBubble;
+              activeAIBubble = nullptr;
+            }
+          } else if (activeResponseText) {
+            if (activeAIBubble) {
+              activeAIBubble->updateText(QString::fromStdString(*activeResponseText));
+            }
+            this->history.push_back({"assistant", *activeResponseText});
+            this->saveCurrentSession();
           }
-        } else if (activeResponseText) {
-          if (activeAIBubble) {
-            activeAIBubble->updateText(QString::fromStdString(*activeResponseText));
+          isRequestRunning = false;
+          activeAIBubble = nullptr;
+          activeResponseText = nullptr;
+          this->enableInput(true);
+          this->updateComposerActionButton();
+          this->scrollArea->verticalScrollBar()->setValue(
+            this->scrollArea->verticalScrollBar()->maximum());
+        };
+
+        if (needRender) {
+          MainWindow *mw = nullptr;
+          for (auto *win : scadApp->windowManager.getWindows()) {
+            mw = win;
+            break;
           }
-          this->history.push_back({"assistant", *activeResponseText});
-          this->saveCurrentSession();
+          if (mw) {
+            mw->startAIFullRender([finishTurn]() { finishTurn(); });
+            return;
+          }
         }
-        // One preview after the full assistant turn (tools + final reply) is done.
-        this->flushPendingPreview();
-        isRequestRunning = false;
-        activeAIBubble = nullptr;
-        activeResponseText = nullptr;
-        this->enableInput(true);
-        this->updateComposerActionButton();  // restore Send arrow
-        this->scrollArea->verticalScrollBar()->setValue(
-          this->scrollArea->verticalScrollBar()->maximum());
+        finishTurn();
       });
     });
 }
@@ -660,6 +680,11 @@ void ChatWidget::stopActiveRequest(bool keepPartialAssistant)
 {
   if (!isRequestRunning) return;
   aiService->cancelPendingRequests();
+  pendingPreviewRender = false;
+  for (auto *win : scadApp->windowManager.getWindows()) {
+    win->cancelAIFullRenderCallback();
+    break;
+  }
   if (activeAIBubble) {
     std::string stop_msg = activeResponseText ? *activeResponseText : "";
     if (stop_msg.empty() || !keepPartialAssistant) {
@@ -1320,7 +1345,7 @@ void ChatWidget::applyCodeChange(const std::string& code)
   }
   if (mw && mw->activeEditor) {
     mw->activeEditor->setText(QString::fromStdString(code));
-    // Defer preview until the assistant turn finishes so we only render once.
+    // Defer full F6 render until the assistant turn finishes (once per turn).
     pendingPreviewRender = true;
   }
 }
@@ -1335,7 +1360,7 @@ void ChatWidget::flushPendingPreview()
     break;
   }
   if (mw) {
-    mw->actionRenderPreview();
+    mw->startAIFullRender([]() {});
   }
 }
 
@@ -1350,9 +1375,9 @@ void ChatWidget::logToolExecution(const std::string& name, const std::string& re
                .arg(QString::fromStdString(result).count('\n'));
   } else if (name == "set_editor_code") {
     summary = tr("Applied code changes");
-    detail = tr("Tool: set_editor_code\nResult: Applied code to the active editor. Preview runs when the reply finishes.");
+    detail = tr("Tool: set_editor_code\nResult: Applied code to the active editor. Full render (F6) runs when the reply finishes.");
   } else if (name == "trigger_preview") {
-    summary = tr("Queued render preview");
+    summary = tr("Queued full render");
     detail = QString::fromStdString("Tool: trigger_preview\nResult: " + result);
   } else {
     summary = tr("Executed tool: %1").arg(QString::fromStdString(name));
@@ -1394,11 +1419,12 @@ std::string ChatWidget::executeTool(const std::string& name, const std::string& 
     }
     std::string code = args["code"].get<std::string>();
     this->applyCodeChange(code);
-    result_val = "Success: Code applied to the editor. Preview will run once when the reply finishes.";
+    result_val =
+      "Success: Code applied to the editor. Full render (F6) will run once when the reply finishes.";
   } else if (name == "trigger_preview") {
-    // Queue a single preview for the end of the turn instead of rendering mid-reply.
+    // Queue a single F6 render for the end of the turn instead of rendering mid-reply.
     pendingPreviewRender = true;
-    result_val = "Success: Preview queued; it will run once when the reply finishes.";
+    result_val = "Success: Full render queued; it will run once when the reply finishes.";
   } else {
     result_val = "Error: Unknown tool name '" + name + "'.";
   }

@@ -181,9 +181,26 @@ void Preferences::init()
   this->defaultmap["advanced/applicationFontFamily"] = applicationFont.family();
   this->defaultmap["advanced/applicationFontSize"] = applicationFont.pointSize();
 
-  // Leave Console font with default if user has not chosen another.
-  this->defaultmap["advanced/consoleFontFamily"] = applicationFont.family();
-  this->defaultmap["advanced/consoleFontSize"] = applicationFont.pointSize();
+  // Console: VS Code terminal defaults (SF Mono / Menlo on macOS), not UI proportional font
+  {
+    const QFont fixed = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    QString consoleFamily = QFontInfo{fixed}.family();
+#ifdef Q_OS_MACOS
+    if (QFontDatabase::hasFamily(QStringLiteral("SF Mono"))) {
+      consoleFamily = QStringLiteral("SF Mono");
+    } else if (QFontDatabase::hasFamily(QStringLiteral("Menlo"))) {
+      consoleFamily = QStringLiteral("Menlo");
+    }
+#elif defined(Q_OS_WIN)
+    if (QFontDatabase::hasFamily(QStringLiteral("Cascadia Mono"))) {
+      consoleFamily = QStringLiteral("Cascadia Mono");
+    } else if (QFontDatabase::hasFamily(QStringLiteral("Consolas"))) {
+      consoleFamily = QStringLiteral("Consolas");
+    }
+#endif
+    this->defaultmap["advanced/consoleFontFamily"] = consoleFamily;
+    this->defaultmap["advanced/consoleFontSize"] = 11;
+  }
 
   // Leave Customizer font with default if user has not chosen another.
   this->defaultmap["advanced/customizerFontFamily"] = applicationFont.family();

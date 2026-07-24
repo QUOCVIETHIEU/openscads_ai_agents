@@ -243,8 +243,8 @@ nlohmann::json getOpenSCADTools()
   nlohmann::json sec_fn = nlohmann::json::object();
   sec_fn["name"] = "set_editor_code";
   sec_fn["description"] =
-    "Apply complete OpenSCAD source code to the editor. The 3D preview renders once when the assistant "
-    "reply finishes.";
+    "Apply complete OpenSCAD source code to the editor. A full F6 render (exportable geometry + "
+    "completion sound) runs once when the assistant reply finishes.";
   nlohmann::json sec_params = nlohmann::json::object();
   sec_params["type"] = "object";
   nlohmann::json sec_props = nlohmann::json::object();
@@ -275,8 +275,8 @@ nlohmann::json getOpenSCADTools()
   nlohmann::json tp_fn = nlohmann::json::object();
   tp_fn["name"] = "trigger_preview";
   tp_fn["description"] =
-    "Queue a compile/preview of the current script. The viewport updates once when the assistant "
-    "reply finishes.";
+    "Queue a full F6 render of the current script. The viewport updates once when the assistant "
+    "reply finishes (same as Design → Render).";
   nlohmann::json tp_params = nlohmann::json::object();
   tp_params["type"] = "object";
   tp_params["properties"] = nlohmann::json::object();

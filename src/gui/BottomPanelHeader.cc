@@ -32,11 +32,6 @@ QIcon paintIcon(int logicalSize, const std::function<void(QPainter&, int)>& pain
   return icon;
 }
 
-QColor glyphColor(bool dark)
-{
-  return dark ? QColor("#cccccc") : QColor("#424242");
-}
-
 }  // namespace
 
 BottomPanelHeader::BottomPanelHeader(QWidget *parent) : QWidget(parent)
@@ -149,42 +144,43 @@ void BottomPanelHeader::setMaximized(bool maximized)
 
 void BottomPanelHeader::rebuildIcons()
 {
-  const QColor g = glyphColor(dark);
+  // Lighter stroke weight to match the compact terminal chrome
+  const QColor g = dark ? QColor("#b0b0b0") : QColor("#6a6a6a");
 
   clearBtn->setIcon(paintIcon(16, [g](QPainter& p, int s) {
-    QPen pen(g, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    QPen pen(g, 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
-    // trash can
-    p.drawLine(QPointF(s * 0.22, s * 0.30), QPointF(s * 0.78, s * 0.30));
-    p.drawLine(QPointF(s * 0.35, s * 0.30), QPointF(s * 0.40, s * 0.18));
-    p.drawLine(QPointF(s * 0.65, s * 0.30), QPointF(s * 0.60, s * 0.18));
-    p.drawLine(QPointF(s * 0.40, s * 0.18), QPointF(s * 0.60, s * 0.18));
-    p.drawRoundedRect(QRectF(s * 0.28, s * 0.30, s * 0.44, s * 0.52), 1.2, 1.2);
-    p.drawLine(QPointF(s * 0.42, s * 0.42), QPointF(s * 0.42, s * 0.70));
-    p.drawLine(QPointF(s * 0.58, s * 0.42), QPointF(s * 0.58, s * 0.70));
+    // thin trash can
+    p.drawLine(QPointF(s * 0.24, s * 0.30), QPointF(s * 0.76, s * 0.30));
+    p.drawLine(QPointF(s * 0.36, s * 0.30), QPointF(s * 0.40, s * 0.20));
+    p.drawLine(QPointF(s * 0.64, s * 0.30), QPointF(s * 0.60, s * 0.20));
+    p.drawLine(QPointF(s * 0.40, s * 0.20), QPointF(s * 0.60, s * 0.20));
+    p.drawRoundedRect(QRectF(s * 0.30, s * 0.30, s * 0.40, s * 0.50), 1.0, 1.0);
+    p.drawLine(QPointF(s * 0.43, s * 0.42), QPointF(s * 0.43, s * 0.68));
+    p.drawLine(QPointF(s * 0.57, s * 0.42), QPointF(s * 0.57, s * 0.68));
   }));
 
   maximizeBtn->setIcon(paintIcon(16, [g, up = !isMaximized](QPainter& p, int s) {
-    QPen pen(g, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    QPen pen(g, 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
     const qreal cx = s * 0.5;
     if (up) {
       p.drawLine(QPointF(cx, s * 0.28), QPointF(cx, s * 0.72));
-      p.drawLine(QPointF(cx, s * 0.28), QPointF(s * 0.30, s * 0.48));
-      p.drawLine(QPointF(cx, s * 0.28), QPointF(s * 0.70, s * 0.48));
+      p.drawLine(QPointF(cx, s * 0.28), QPointF(s * 0.32, s * 0.46));
+      p.drawLine(QPointF(cx, s * 0.28), QPointF(s * 0.68, s * 0.46));
     } else {
       p.drawLine(QPointF(cx, s * 0.28), QPointF(cx, s * 0.72));
-      p.drawLine(QPointF(cx, s * 0.72), QPointF(s * 0.30, s * 0.52));
-      p.drawLine(QPointF(cx, s * 0.72), QPointF(s * 0.70, s * 0.52));
+      p.drawLine(QPointF(cx, s * 0.72), QPointF(s * 0.32, s * 0.54));
+      p.drawLine(QPointF(cx, s * 0.72), QPointF(s * 0.68, s * 0.54));
     }
   }));
 
   moreBtn->setIcon(paintIcon(16, [g](QPainter& p, int s) {
     p.setPen(Qt::NoPen);
     p.setBrush(g);
-    const qreal r = 1.4;
+    const qreal r = 1.15;
     const qreal cy = s * 0.5;
     p.drawEllipse(QPointF(s * 0.25, cy), r, r);
     p.drawEllipse(QPointF(s * 0.50, cy), r, r);
@@ -192,10 +188,10 @@ void BottomPanelHeader::rebuildIcons()
   }));
 
   closeBtn->setIcon(paintIcon(16, [g](QPainter& p, int s) {
-    QPen pen(g, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    QPen pen(g, 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
     p.setPen(pen);
-    p.drawLine(QPointF(s * 0.28, s * 0.28), QPointF(s * 0.72, s * 0.72));
-    p.drawLine(QPointF(s * 0.72, s * 0.28), QPointF(s * 0.28, s * 0.72));
+    p.drawLine(QPointF(s * 0.30, s * 0.30), QPointF(s * 0.70, s * 0.70));
+    p.drawLine(QPointF(s * 0.70, s * 0.30), QPointF(s * 0.30, s * 0.70));
   }));
 }
 
