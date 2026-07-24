@@ -244,6 +244,7 @@
      <addaction name="fileActionExportSVG"/>
      <addaction name="fileActionExportCSG"/>
      <addaction name="fileActionExportPDF"/>
+     <addaction name="fileActionExportDrawingPDF"/>
      <addaction name="separator"/>
      <addaction name="fileActionExportImage"/>
     </widget>
@@ -1587,6 +1588,17 @@
    </property>
    <property name="text">
     <string>Export as PDF...</string>
+   </property>
+  </action>
+  <action name="fileActionExportDrawingPDF">
+   <property name="icon">
+    <iconset theme="chokusen-export-pdf-2d"/>
+   </property>
+   <property name="text">
+    <string>Export 2D Drawing PDF...</string>
+   </property>
+   <property name="toolTip">
+    <string>Export 2D Drawing PDF</string>
    </property>
   </action>
   <action name="viewActionHide3DViewToolBar">

@@ -105,6 +105,10 @@ public:
   TabManager *tabManager;
   AIDock *aiDock;
   QToolButton *aiChatRevealButton = nullptr;
+  class BottomPanelHeader *bottomPanelHeader{nullptr};
+  class QStackedWidget *bottomPanelStack{nullptr};
+  int bottomPanelNormalHeight{160};
+  bool bottomPanelMaximized{false};
   QWidget *previewHeaderRow = nullptr;
 
   std::shared_ptr<const Geometry> rootGeom;
@@ -147,6 +151,10 @@ private:
   void setupStatusBar();
   void setupConsole();
   void setupErrorLog();
+  void setupBottomPanel();
+  void updateBottomPanelErrorBadge();
+  void toggleBottomPanelMaximize();
+  void showBottomPanelTab(int tab);
   void setupEditor(const QStringList& filenames);
   void setupCustomizer();
   void setupAnimate();
@@ -368,6 +376,7 @@ private slots:
   bool canExport(unsigned int dim);
   void actionExport(unsigned int dim, ExportInfo& exportInfo);
   void actionExportFileFormat(int fmt);
+  void on_fileActionExportDrawingPDF_triggered();
   void on_editActionCopyViewport_triggered();
   void on_designActionFlushCaches_triggered();
 

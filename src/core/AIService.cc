@@ -30,7 +30,26 @@ std::string AIService::defaultSystemPrompt()
     "Do NOT repeat the editor contents. Keep replies concise — no long filler.\n"
     "5. **Formatting**: Use ACTUAL NEWLINES inside tool arguments for code. Never use literal '\\n' "
     "sequences in `set_editor_code`.\n"
-    "6. **Tone**: Technical, concise, and helpful.";
+    "6. **Tone**: Technical, concise, and helpful.\n\n"
+    "### 2D DRAWING → 3D (when the user attaches a drawing image / orthographic PDF page):\n"
+    "Treat attached images of technical drawings as engineering input and rebuild a parametric 3D "
+    "OpenSCAD model. Users may attach the drawing with little or no text — infer everything from the "
+    "sheet.\n"
+    "1. **CRITICAL — silhouettes are NOT solids**: Labels like `Top/Front (outer silhouette only)` "
+    "show the outer outline. NEVER extrude a silhouette into a solid block / filled prism.\n"
+    "2. **SECTION views define depth**: `SECTION A-A` / `SECTION B-B` are material cuts "
+    "(rim or midplane). **Hatched = solid plastic**. **Empty regions inside the section outline = "
+    "pockets, cavities, or holes**. Read wall thickness, floor thickness, and pocket depth from "
+    "SECTION views (and any `wall~` / `floor~` hints printed on them).\n"
+    "3. **Read dimensions**: overall X×Y×Z, chain dims, Ø holes, R fillets from all views.\n"
+    "4. **Infer solid (typical shell)**: `difference() { outer_body(); inner_cavity(); }` then "
+    "subtract hole cylinders from the Top hole pattern. Align Z-up. If sections show a tray / "
+    "open pocket, the cavity must remain open at the top — do not fill it.\n"
+    "5. **Parameters first**: Named variables for every major size (`wall_t`, `floor_t`, `pocket_d`, "
+    "`hole_d`, …).\n"
+    "6. **Fidelity**: Prefer documented SECTION thicknesses over guessing. If unreadable, pick a "
+    "clear named default and state it in chat.\n"
+    "7. **Apply**: `set_editor_code` with the full script; chat = short dimension summary only.";
 }
 
 #ifndef __EMSCRIPTEN__
@@ -69,6 +88,21 @@ static void appendMandatoryChatReplyRule(std::string& sys_prompt)
     "Do NOT paste OpenSCAD source code into the chat (no fenced code blocks, no full scripts, no large "
     "snippets). Apply all code only via `set_editor_code`. In chat, briefly describe the design — "
     "dimensions, features, and useful tweaks — in short prose or bullets.";
+}
+
+// Always reinforce drawing→3D rules even when the user has a custom system_prompt.
+static void appendMandatoryDrawingRule(std::string& sys_prompt)
+{
+  constexpr const char *kMarker = "### 2D DRAWING → 3D (MANDATORY ADDENDUM):";
+  if (sys_prompt.find(kMarker) != std::string::npos) {
+    return;
+  }
+  sys_prompt +=
+    "\n\n### 2D DRAWING → 3D (MANDATORY ADDENDUM):\n"
+    "When the user attaches a 2D drawing / orthographic sheet image: silhouettes are OUTER outlines "
+    "only — NEVER extrude them into a solid block. SECTION A-A/B-B hatched areas = solid material; "
+    "empty areas inside sections = pockets/cavities/holes. Prefer `difference(outer, cavity)` for "
+    "trays/shells; read wall/floor thickness from sections; apply via `set_editor_code`.";
 }
 
 // Old builds seeded restrictive defaults. Strip those exact values so requests are
@@ -218,6 +252,7 @@ void AIService::chatCompletionStream(std::vector<ChatMessage>& history, ChunkCal
     }
   }
   appendMandatoryChatReplyRule(sys_prompt);
+  appendMandatoryDrawingRule(sys_prompt);
 
   bool already_has_system = false;
   if (!history.empty() && history[0].role == "system") {
@@ -309,6 +344,7 @@ void AIService::chatCompletion(const std::vector<ChatMessage>& history, Response
     }
   }
   appendMandatoryChatReplyRule(sys_prompt);
+  appendMandatoryDrawingRule(sys_prompt);
 
   bool already_has_system = false;
   if (!history.empty() && history[0].role == "system") {

@@ -550,6 +550,27 @@ void ChatWidget::onSendPressed()
     return;
   }
 
+  // When images are attached (e.g. 2D drawing sheets), inject reconstruction rules so the
+  // model doesn't treat silhouettes as solid extrusions even if the user sends little text.
+  if (!pendingImages.isEmpty() && !prompt.contains(QStringLiteral("[DRAWING→3D]"))) {
+    static const QString kDrawingHint = QStringLiteral(
+      "[DRAWING→3D] Rebuild a parametric 3D OpenSCAD model from the attached drawing.\n"
+      "CRITICAL:\n"
+      "- Top/Front silhouettes are OUTER outlines only — do NOT extrude into a solid block.\n"
+      "- SECTION A-A / B-B: hatched = solid material; empty regions in the section = "
+      "pockets/cavities/holes.\n"
+      "- Read wall thickness, floor thickness, and pocket depth from the SECTION views "
+      "(and any wall~/floor~ hints).\n"
+      "- Typical tray/shell: difference() of outer body minus inner cavity, then hole "
+      "cylinders from Top. Keep pockets open at the top if sections show an open tray.\n"
+      "- Apply the full script with set_editor_code. Chat = short dimension summary only.");
+    if (prompt.isEmpty()) {
+      prompt = kDrawingHint;
+    } else {
+      prompt = prompt + QStringLiteral("\n\n") + kDrawingHint;
+    }
+  }
+
   const QList<QImage> imagesToSend = pendingImages;
   clearPendingImages();
   inputField->clear();

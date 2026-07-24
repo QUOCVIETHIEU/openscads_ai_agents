@@ -26,13 +26,16 @@
 
 #include "gui/Console.h"
 
+#include <QApplication>
 #include <QBrush>
 #include <QColor>
 #include <QContextMenuEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFocusEvent>
+#include <QFrame>
 #include <QMenu>
+#include <QPalette>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
 #include <QString>
@@ -57,6 +60,9 @@ Console::Console(QWidget *parent) : QPlainTextEdit(parent)
   this->appendCursor = this->textCursor();
   this->setUndoRedoEnabled(false);
   this->setTextInteractionFlags(Qt::TextSelectableByKeyboard | Qt::TextSelectableByMouse);
+  // Flat panel look (VS Code-style): no native inset frame / thick border
+  this->setFrameShape(QFrame::NoFrame);
+  this->setLineWrapMode(QPlainTextEdit::WidgetWidth);
 
   connect(GlobalPreferences::inst(), &Preferences::consoleFontChanged, this, &Console::setConsoleFont);
 }
@@ -129,13 +135,23 @@ void Console::addHtml(const QString& html)
 
 void Console::setConsoleFont(const QString& fontFamily, uint ptSize)
 {
-  const auto stylesheet = QString(R"(
+  // Match MainWindow flat workbench panel colors (editor / AI chrome).
+  const bool dark = QApplication::palette().color(QPalette::Window).lightness() < 128;
+  const QString bg = dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8");
+  const QString fg = dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333");
+  const QString sel = dark ? QStringLiteral("#264f78") : QStringLiteral("#add6ff");
+  const auto stylesheet = QStringLiteral(R"(
     QPlainTextEdit {
-        font-family: '%1';
-        font-size: %2pt;
+      font-family: '%1';
+      font-size: %2pt;
+      background: %3;
+      color: %4;
+      border: none;
+      selection-background-color: %5;
+      padding: 4px 8px;
     }
   )");
-  this->setStyleSheet(stylesheet.arg(fontFamily, QString::number(ptSize)));
+  this->setStyleSheet(stylesheet.arg(fontFamily, QString::number(ptSize), bg, fg, sel));
 }
 
 void Console::update()

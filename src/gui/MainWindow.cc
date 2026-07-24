@@ -41,6 +41,7 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QFontMetrics>
+#include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -62,6 +63,8 @@
 #include <QSignalMapper>
 #include <QSoundEffect>
 #include <QSplitter>
+#include <QStackedWidget>
+#include <QAbstractItemModel>
 #include <QStatusBar>
 #include <QStringList>
 #include <QTemporaryFile>
@@ -130,6 +133,8 @@
 #include "gui/CGALWorker.h"
 #include "gui/ColorList.h"
 #include "gui/Dock.h"
+#include "gui/BottomPanelHeader.h"
+#include "gui/Console.h"
 #include "gui/ai/AIDock.h"
 #include "gui/ai/ChatWidget.h"
 #include "gui/Editor.h"
@@ -414,6 +419,10 @@ void MainWindow::addExportActions(QToolBar *toolbar, QAction *action) const
       toolbar->insertAction(action, exportAction);
     }
   }
+  // Always offer quick 2D drawing PDF next to the configured export formats
+  if (this->fileActionExportDrawingPDF) {
+    toolbar->insertAction(action, this->fileActionExportDrawingPDF);
+  }
 }
 
 void MainWindow::updateExportActions()
@@ -619,9 +628,9 @@ void MainWindow::updateReorderMode(bool reorderMode)
 {
   MainWindow::reorderMode = reorderMode;
   for (auto& [dock, name] : docks) {
-    // AI-first layout: hide Editor + AI Chat dock title bars so chrome
-    // matches VS Code secondary sidebars (internal headers only).
-    if (dock == editorDock || dock == aiDock) {
+    // AI-first layout: hide Editor + AI Chat + Console dock title bars so chrome
+    // matches VS Code (Console uses BottomPanelHeader instead).
+    if (dock == editorDock || dock == aiDock || dock == consoleDock) {
       dock->setTitleBarVisibility(false);
       continue;
     }
@@ -2676,6 +2685,98 @@ void MainWindow::actionExportFileFormat(int fmt)
   }
 }
 
+void MainWindow::on_fileActionExportDrawingPDF_triggered()
+{
+  if (GuiLocker::isLocked()) return;
+  const GuiLocker lock;
+
+  auto guard = scopedSetCurrentOutput();
+
+  if (!rootGeom) {
+    LOG(message_group::Error, "Nothing to export! Try rendering first (press F6)");
+    return;
+  }
+
+  if (!activeEditor->contentsRendered) {
+    auto ret = QMessageBox::warning(this, "Application",
+                                    "The current tab has been modified since its last render (F6).\n"
+                                    "Do you really want to export the previous content?",
+                                    QMessageBox::Yes | QMessageBox::No);
+    if (ret != QMessageBox::Yes) {
+      return;
+    }
+  }
+
+  if (renderedEditor != activeEditor) {
+    auto ret = QMessageBox::warning(this, "Application",
+                                    "The rendered data is of different tab.\n"
+                                    "Do you really want to export the another tab's content?",
+                                    QMessageBox::Yes | QMessageBox::No);
+    if (ret != QMessageBox::Yes) {
+      return;
+    }
+  }
+
+  const unsigned int dim = rootGeom->getDimension();
+  if (dim != 2 && dim != 3) {
+    LOG(message_group::UI_Error, "Current top level object is not a 2D or 3D object.");
+    return;
+  }
+
+  if (rootGeom->isEmpty()) {
+    LOG(message_group::UI_Error, "Current top level object is empty.");
+    return;
+  }
+
+  const QString suffix = "pdf";
+  auto exportFilename =
+    QFileDialog::getSaveFileName(this, _("Export 2D Drawing PDF"), exportPath(suffix),
+                                 _("PDF Files (*.pdf)"));
+  auto guard2 = scopedSetCurrentOutput();
+  if (exportFilename.isEmpty()) {
+    return;
+  }
+  this->exportPaths[suffix] = exportFilename;
+
+  OrthographicDrawingViews views = GeometryProjection::projectOrthographicViews(rootGeom);
+  if (!views.top || views.top->isEmpty()) {
+    LOG(message_group::Error, "Failed to create 2D projection for drawing export.");
+    return;
+  }
+
+  const FileFormatInfo& info = fileformat::info(FileFormat::PDF);
+  ExportInfo exportInfo =
+    createExportInfo(FileFormat::PDF, info, activeEditor->filepath.toStdString(), &qglview->cam, {});
+  exportInfo.title = QFileInfo(exportFilename).completeBaseName().toStdString();
+
+  std::ios::openmode mode = std::ios::out | std::ios::trunc | std::ios::binary;
+  std::ofstream fstream(std::filesystem::u8path(exportFilename.toStdString()), mode);
+  if (!fstream.is_open()) {
+    LOG(_("Can't open file \"%1$s\" for export"), exportFilename.toStdString());
+    return;
+  }
+
+  bool onerror = false;
+  fstream.exceptions(std::ios::badbit | std::ios::failbit);
+  try {
+    export_drawing_pdf(views, fstream, exportInfo);
+  } catch (std::ios::failure&) {
+    onerror = true;
+  }
+  try {
+    fstream.close();
+  } catch (std::ios::failure&) {
+    onerror = true;
+  }
+
+  if (onerror) {
+    LOG(message_group::Error, _("\"%1$s\" write error. (Disk full?)"), exportFilename.toStdString());
+    return;
+  }
+
+  fileExportedMessage(_("2D Drawing PDF"), exportFilename);
+}
+
 void MainWindow::on_editActionCopy_triggered()
 {
   if (tryFocusedTextEditClipboard(QStringLiteral("copy"))) {
@@ -3002,9 +3103,9 @@ void MainWindow::on_viewActionHide3DViewToolBar_toggled(bool checked)
 void MainWindow::showLink(const QString& link)
 {
   if (link == "#console") {
-    consoleDock->show();
+    showBottomPanelTab(BottomPanelHeader::ConsoleTab);
   } else if (link == "#errorlog") {
-    errorLogDock->show();
+    showBottomPanelTab(BottomPanelHeader::ErrorLogTab);
   } else if (link == "#colorlist") {
     colorListDock->show();
   }
@@ -3035,16 +3136,21 @@ void MainWindow::onConsoleDockVisibilityChanged(bool isVisible)
   if (isVisible) {
     frameCompileResult->hide();
     consoleDock->raise();
-    console->setFocus();
+    if (bottomPanelHeader && bottomPanelHeader->activeTab() == BottomPanelHeader::ErrorLogTab &&
+        errorLogWidget) {
+      errorLogWidget->setFocus();
+    } else if (console) {
+      console->setFocus();
+    }
   }
 }
 
 void MainWindow::onErrorLogDockVisibilityChanged(bool isVisible)
 {
+  // Error Log lives inside the bottom panel now; redirect legacy dock show requests.
   if (isVisible) {
-    frameCompileResult->hide();
-    errorLogDock->raise();
-    errorLogWidget->logTable->setFocus();
+    errorLogDock->hide();
+    showBottomPanelTab(BottomPanelHeader::ErrorLogTab);
   }
 }
 
@@ -3698,6 +3804,126 @@ void MainWindow::setupErrorLog()
 
   QObject::connect(errorLogDock, &Dock::visibilityChanged, this,
                    &MainWindow::onErrorLogDockVisibilityChanged);
+
+  // VS Code-style bottom panel needs both Console + Error Log widgets
+  setupBottomPanel();
+}
+
+/**
+  Build a VS Code-style bottom panel: custom tab header + stacked Console/Error Log.
+ */
+void MainWindow::setupBottomPanel()
+{
+  if (!consoleDockContents || !console || !errorLogWidget || bottomPanelHeader) {
+    return;
+  }
+
+  consoleDock->setTitleBarVisibility(false);
+
+  auto *rootLayout = qobject_cast<QVBoxLayout *>(consoleDockContents->layout());
+  if (!rootLayout) {
+    return;
+  }
+
+  // Detach console from its layout slot
+  rootLayout->removeWidget(console);
+
+  // Detach error log from its own dock and embed it here
+  if (auto *errLayout = qobject_cast<QVBoxLayout *>(errorLogDockContents->layout())) {
+    errLayout->removeWidget(errorLogWidget);
+  }
+
+  bottomPanelStack = new QStackedWidget(consoleDockContents);
+  bottomPanelStack->setObjectName(QStringLiteral("bottomPanelStack"));
+  bottomPanelStack->addWidget(console);
+  bottomPanelStack->addWidget(errorLogWidget);
+  bottomPanelStack->setCurrentIndex(0);
+
+  bottomPanelHeader = new BottomPanelHeader(consoleDockContents);
+  rootLayout->addWidget(bottomPanelHeader);
+  rootLayout->addWidget(bottomPanelStack, 1);
+
+  // Hide the standalone Error Log dock; tabs live in the bottom panel header
+  removeDockWidget(errorLogDock);
+  errorLogDock->hide();
+
+  connect(bottomPanelHeader, &BottomPanelHeader::tabChanged, this, [this](int tab) {
+    if (bottomPanelStack) {
+      bottomPanelStack->setCurrentIndex(tab);
+    }
+    if (tab == BottomPanelHeader::ConsoleTab && console) {
+      console->setFocus();
+    } else if (tab == BottomPanelHeader::ErrorLogTab && errorLogWidget) {
+      errorLogWidget->setFocus();
+    }
+  });
+
+  connect(bottomPanelHeader, &BottomPanelHeader::clearClicked, this, [this]() {
+    if (!bottomPanelHeader || !bottomPanelStack) return;
+    if (bottomPanelHeader->activeTab() == BottomPanelHeader::ConsoleTab) {
+      if (console) console->clear();
+    } else if (errorLogWidget) {
+      errorLogWidget->clearModel();
+      updateBottomPanelErrorBadge();
+    }
+  });
+
+  connect(bottomPanelHeader, &BottomPanelHeader::moreClearConsole, this, [this]() {
+    if (console) console->clear();
+  });
+  connect(bottomPanelHeader, &BottomPanelHeader::moreSaveConsole, this, [this]() {
+    if (console) console->on_actionSaveAs_triggered();
+  });
+  connect(bottomPanelHeader, &BottomPanelHeader::closeClicked, this, [this]() {
+    if (consoleDock) consoleDock->hide();
+  });
+  connect(bottomPanelHeader, &BottomPanelHeader::maximizeClicked, this,
+          &MainWindow::toggleBottomPanelMaximize);
+
+  if (errorLogWidget && errorLogWidget->errorLogModel) {
+    auto *model = errorLogWidget->errorLogModel;
+    const auto refreshBadge = [this]() { updateBottomPanelErrorBadge(); };
+    connect(model, &QAbstractItemModel::rowsInserted, this, refreshBadge);
+    connect(model, &QAbstractItemModel::rowsRemoved, this, refreshBadge);
+    connect(model, &QAbstractItemModel::modelReset, this, refreshBadge);
+  }
+  updateBottomPanelErrorBadge();
+}
+
+void MainWindow::updateBottomPanelErrorBadge()
+{
+  if (!bottomPanelHeader || !errorLogWidget || !errorLogWidget->errorLogModel) return;
+  bottomPanelHeader->setErrorCount(errorLogWidget->errorLogModel->rowCount());
+}
+
+void MainWindow::toggleBottomPanelMaximize()
+{
+  if (!consoleDock || !consoleDock->isVisible()) return;
+  if (!bottomPanelMaximized) {
+    bottomPanelNormalHeight = std::max(120, consoleDock->height());
+    const int target = std::max(240, static_cast<int>(height() * 0.55));
+    resizeDocks({consoleDock}, {target}, Qt::Vertical);
+    bottomPanelMaximized = true;
+  } else {
+    resizeDocks({consoleDock}, {bottomPanelNormalHeight}, Qt::Vertical);
+    bottomPanelMaximized = false;
+  }
+  if (bottomPanelHeader) {
+    bottomPanelHeader->setMaximized(bottomPanelMaximized);
+  }
+}
+
+void MainWindow::showBottomPanelTab(int tab)
+{
+  if (consoleDock) {
+    consoleDock->show();
+    consoleDock->raise();
+  }
+  if (bottomPanelHeader) {
+    bottomPanelHeader->setActiveTab(tab);
+  } else if (bottomPanelStack) {
+    bottomPanelStack->setCurrentIndex(tab);
+  }
 }
 
 /**
@@ -3926,13 +4152,46 @@ void MainWindow::applyFlatWorkbenchChrome()
     QDockWidget {
       border: none;
     }
+    QDockWidget::title {
+      text-align: left;
+      background: %4;
+      color: %6;
+      border: none;
+      border-top: 1px solid %1;
+      border-bottom: 1px solid %1;
+      padding: 5px 10px;
+      font-size: 12px;
+    }
     QDockWidget > QWidget {
       background: transparent;
       border: none;
     }
-    QWidget#editorDockContents, QWidget#centralwidget, QWidget#mainWidget {
+    QWidget#editorDockContents, QWidget#centralwidget, QWidget#mainWidget,
+    QWidget#consoleDockContents, QWidget#errorLogDockContents {
       border: none;
       background: %3;
+    }
+    QWidget#consoleDockContents Console,
+    QWidget#consoleDockContents QPlainTextEdit {
+      background: %3;
+      color: %6;
+      border: none;
+    }
+    QWidget#errorLogDockContents QTableView {
+      background: %3;
+      color: %6;
+      border: none;
+      gridline-color: %1;
+      outline: 0;
+    }
+    QWidget#errorLogDockContents QHeaderView::section {
+      background: %4;
+      color: %6;
+      border: none;
+      border-bottom: 1px solid %1;
+      border-right: 1px solid %1;
+      padding: 3px 6px;
+      font-size: 11px;
     }
     QToolBar#editortoolbar {
       background: %4;
@@ -4078,6 +4337,17 @@ void MainWindow::applyFlatWorkbenchChrome()
     replaceInputField->setMinimumWidth(160);
     replaceInputField->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
   }
+
+  // Keep Console flat / theme-matched when chrome or OS theme changes
+  if (this->console) {
+    this->console->setFrameShape(QFrame::NoFrame);
+    this->console->setConsoleFont(
+      GlobalPreferences::inst()->getValue("advanced/consoleFontFamily").toString(),
+      GlobalPreferences::inst()->getValue("advanced/consoleFontSize").toUInt());
+  }
+  if (this->bottomPanelHeader) {
+    this->bottomPanelHeader->applyTheme();
+  }
 }
 
 /**
@@ -4140,6 +4410,8 @@ void MainWindow::setupDocks()
 {
   setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
   setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
+  // VS Code layout: left (editor) + right (AI) run full height; bottom Console
+  // sits only in the center column between them — not full window width.
   setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
   setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
 
@@ -4148,7 +4420,6 @@ void MainWindow::setupDocks()
     {editorDock, _("&Editor")},
     {consoleDock, _("&Console")},
     {parameterDock, _("C&ustomizer")},
-    {errorLogDock, _("Error &Log")},
     {animateDock, _("&Animate")},
     {fontListDock, _("&Font List")},
     {colorListDock, _("C&olor List")},
@@ -4183,6 +4454,26 @@ void MainWindow::setupDocks()
     dockAction->setProperty("id", QVariant::fromValue(dock));
     connect(dockAction, &QAction::triggered, this, &MainWindow::onNavigationTriggerContextMenuEntry);
     connect(dockAction, &QAction::hovered, this, &MainWindow::onNavigationHoveredContextMenuEntry);
+  }
+
+  // Error Log is a tab inside the bottom panel (VS Code-style), not a separate dock.
+  {
+    auto *errorLogAction = menuWindow->addAction(_("Error &Log"));
+    errorLogAction->setObjectName(QStringLiteral("windowActionToggleErrorLog"));
+    errorLogAction->setCheckable(true);
+    connect(errorLogAction, &QAction::triggered, this, [this, errorLogAction](bool checked) {
+      if (checked) {
+        showBottomPanelTab(BottomPanelHeader::ErrorLogTab);
+      } else if (consoleDock && consoleDock->isVisible() && bottomPanelHeader &&
+                 bottomPanelHeader->activeTab() == BottomPanelHeader::ErrorLogTab) {
+        consoleDock->hide();
+      }
+      errorLogAction->setChecked(consoleDock && consoleDock->isVisible() && bottomPanelHeader &&
+                                 bottomPanelHeader->activeTab() == BottomPanelHeader::ErrorLogTab);
+    });
+    auto *navError = navigationMenu->addAction(_("Error &Log"));
+    connect(navError, &QAction::triggered, this,
+            [this]() { showBottomPanelTab(BottomPanelHeader::ErrorLogTab); });
   }
 
   connect(navigationMenu, &QMenu::aboutToHide, this, &MainWindow::onNavigationCloseContextMenu);
@@ -4407,7 +4698,9 @@ void MainWindow::setupMenusAndActions()
 void MainWindow::restoreWindowState()
 {
   QSettingsCached settings;
-  constexpr int kAiFirstLayoutVersion = 2;
+  // v2: AI-first side chat layout. v3: Console visible by default.
+  // v4: VS Code-style bottom panel header (Console / Error Log tabs + actions).
+  constexpr int kAiFirstLayoutVersion = 4;
   const int layoutVersion = settings.value("window/layoutVersion", 0).toInt();
   const bool forceAiFirstLayout = layoutVersion < kAiFirstLayoutVersion;
 
@@ -4447,18 +4740,24 @@ void MainWindow::restoreWindowState()
      * fill the available space.
      */
     activeEditor->setInitialSizeHint(QSize((5 * this->width() / 11), 100));
-    tabifyDockWidget(consoleDock, errorLogDock);
-    tabifyDockWidget(errorLogDock, fontListDock);
+    addDockWidget(Qt::BottomDockWidgetArea, consoleDock);
+    // Other utility docks stay available via Window menu (not tabbed into Console)
     tabifyDockWidget(fontListDock, colorListDock);
     tabifyDockWidget(colorListDock, animateDock);
     tabifyDockWidget(animateDock, viewportControlDock);
     parameterDock->hide();
-    errorLogDock->hide();
     fontListDock->hide();
     colorListDock->hide();
     animateDock->hide();
     viewportControlDock->hide();
-    consoleDock->hide();
+
+    // VS Code-style: Console panel visible at the bottom by default
+    consoleDock->show();
+    consoleDock->raise();
+    if (bottomPanelHeader) {
+      bottomPanelHeader->setActiveTab(BottomPanelHeader::ConsoleTab);
+    }
+    resizeDocks({consoleDock}, {160}, Qt::Vertical);
 
     // AI-first migration: enable AI features and show the chat dock
     if (forceAiFirstLayout) {

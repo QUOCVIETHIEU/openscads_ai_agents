@@ -15,6 +15,7 @@
 #include "core/SourceFile.h"
 #include "core/Tree.h"
 #include "geometry/Geometry.h"
+#include "geometry/GeometryProjection.h"
 #include "geometry/linalg.h"
 #include "glview/Camera.h"
 #include "glview/ColorMap.h"
@@ -322,6 +323,8 @@ void export_pov(const std::shared_ptr<const Geometry>& geom, std::ostream& outpu
                 const ExportInfo& exportInfo);
 void export_pdf(const std::shared_ptr<const Geometry>& geom, std::ostream& output,
                 const ExportInfo& exportInfo);
+void export_drawing_pdf(const OrthographicDrawingViews& views, std::ostream& output,
+                        const ExportInfo& exportInfo);
 void export_nefdbg(const std::shared_ptr<const Geometry>& geom, std::ostream& output);
 void export_nef3(const std::shared_ptr<const Geometry>& geom, std::ostream& output);
 

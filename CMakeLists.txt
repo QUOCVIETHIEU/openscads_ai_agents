@@ -1085,6 +1085,7 @@ set(CORE_SOURCES
   src/geometry/PolySet.cc
   src/geometry/PolySetBuilder.cc
   src/geometry/PolySetUtils.cc
+  src/geometry/GeometryProjection.cc
   src/geometry/Polygon2d.cc
   src/geometry/boolean_utils.cc
   src/geometry/linalg.cc
@@ -1105,6 +1106,7 @@ set(CORE_SOURCES
   src/io/export_off.cc
   src/io/export_param.cc
   src/io/export_pdf.cc
+  src/io/export_drawing_pdf.cc
   src/io/export_stl.cc
   src/io/export_svg.cc
   src/io/export_pov.cc
@@ -1305,6 +1307,7 @@ set(GUI_SOURCES
   src/gui/CGALWorker.cc
   src/gui/ViewportControl.cc
   src/gui/Console.cc
+  src/gui/BottomPanelHeader.cc
   src/gui/Dock.cc
   src/gui/Editor.cc
   src/gui/ErrorLog.cc
@@ -1385,6 +1388,7 @@ set(GUI_HEADERS
     src/gui/AutoUpdater.h
     src/gui/CGALWorker.h
     src/gui/Console.h
+    src/gui/BottomPanelHeader.h
     src/gui/Dock.h
     src/gui/Editor.h
     src/gui/ErrorLog.h
