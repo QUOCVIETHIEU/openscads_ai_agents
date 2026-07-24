@@ -17,7 +17,10 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFont>
+#include <QIcon>
 #include <QMessageBox>
+#include <QPalette>
 #include <QPoint>
 #include <QSaveFile>
 #include <QShortcut>
@@ -37,6 +40,136 @@
 #include "gui/ScintillaEditor.h"
 #include "utils/printutils.h"
 
+namespace {
+
+void applyVSCodeTabStyle(QTabWidget *tabWidget)
+{
+  if (!tabWidget) return;
+
+  tabWidget->setDocumentMode(true);
+  tabWidget->setUsesScrollButtons(true);
+  tabWidget->setElideMode(Qt::ElideMiddle);
+  tabWidget->setIconSize(QSize(16, 16));
+
+  QTabBar *bar = tabWidget->tabBar();
+  bar->setExpanding(false);
+  bar->setDrawBase(false);
+  bar->setMovable(true);
+  bar->setIconSize(QSize(16, 16));
+  // Match VS Code / Cursor tab strip height
+  bar->setStyle(bar->style());
+
+  const bool dark = QApplication::palette().color(QPalette::Window).lightness() < 128;
+
+  // Closely matches VS Code / Cursor workbench editor tabs (light & dark)
+  QString style;
+  if (dark) {
+    style = QStringLiteral(R"(
+      QTabWidget::pane {
+        border: none;
+        top: 0px;
+        background: #1e1e1e;
+      }
+      QTabWidget::tab-bar {
+        alignment: left;
+        left: 0px;
+      }
+      QTabBar {
+        background: #252526;
+        border: none;
+        border-bottom: 1px solid #2b2b2b;
+        min-height: 28px;
+        max-height: 28px;
+      }
+      QTabBar::tab {
+        background: #2d2d2d;
+        color: rgba(204, 204, 204, 0.6);
+        border: none;
+        border-right: 1px solid #252526;
+        border-radius: 0px;
+        min-width: 90px;
+        max-width: 200px;
+        min-height: 28px;
+        max-height: 28px;
+        padding: 0px 10px 0px 8px;
+        margin: 0px;
+        font-size: 12px;
+      }
+      QTabBar::tab:selected {
+        background: #1e1e1e;
+        color: #ffffff;
+        border-right: 1px solid #2b2b2b;
+      }
+      QTabBar::tab:hover:!selected {
+        background: #2a2d2e;
+        color: #cccccc;
+      }
+      QTabBar::close-button {
+        subcontrol-position: right;
+        margin: 0px 12px 0px 4px;
+      }
+      QTabBar::close-button:hover {
+        background: #3c3c3c;
+        border-radius: 3px;
+      }
+    )");
+  } else {
+    style = QStringLiteral(R"(
+      QTabWidget::pane {
+        border: none;
+        top: 0px;
+        background: #f8f8f8;
+      }
+      QTabWidget::tab-bar {
+        alignment: left;
+        left: 0px;
+      }
+      QTabBar {
+        background: #f3f3f3;
+        border: none;
+        border-bottom: 1px solid #e5e5e5;
+        min-height: 28px;
+        max-height: 28px;
+      }
+      QTabBar::tab {
+        background: #ececec;
+        color: rgba(51, 51, 51, 0.7);
+        border: none;
+        border-right: 1px solid #f3f3f3;
+        border-radius: 0px;
+        min-width: 90px;
+        max-width: 200px;
+        min-height: 28px;
+        max-height: 28px;
+        padding: 0px 10px 0px 8px;
+        margin: 0px;
+        font-size: 12px;
+      }
+      QTabBar::tab:selected {
+        background: #f8f8f8;
+        color: #333333;
+        border-right: 1px solid #e5e5e5;
+      }
+      QTabBar::tab:hover:!selected {
+        background: #e8e8e8;
+        color: #333333;
+      }
+      QTabBar::close-button {
+        subcontrol-position: right;
+        margin: 0px 12px 0px 4px;
+      }
+      QTabBar::close-button:hover {
+        background: #e0e0e0;
+        border-radius: 3px;
+      }
+    )");
+  }
+
+  tabWidget->setStyleSheet(style);
+}
+
+}  // namespace
+
 TabManager::TabManager(MainWindow *o, const QString& filename)
 {
   parent = o;
@@ -45,6 +178,7 @@ TabManager::TabManager(MainWindow *o, const QString& filename)
   tabWidget->setTabsClosable(true);
   tabWidget->setMovable(true);
   tabWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+  applyVSCodeTabStyle(tabWidget);
 
   connect(tabWidget, &QTabWidget::tabCloseRequested, this, &TabManager::closeTabRequested);
   connect(tabWidget, &QTabWidget::customContextMenuRequested, this,
@@ -232,7 +366,8 @@ void TabManager::createTab(const QString& filename)
 
   // Get the name of the tab in editor
   auto [fname, fpath] = getEditorTabNameWithModifier(editor);
-  tabWidget->addTab(editor, fname);
+  const int tabIndex = tabWidget->addTab(editor, fname);
+  tabWidget->setTabToolTip(tabIndex, fpath);
   if (tabWidget->currentWidget() != editor) {
     tabWidget->setCurrentWidget(editor);
   }

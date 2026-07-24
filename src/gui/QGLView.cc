@@ -47,6 +47,8 @@
 #include <iostream>
 #include <QApplication>
 #include <QWheelEvent>
+#include <QEvent>
+#include <QNativeGestureEvent>
 #include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QMouseEvent>
@@ -238,6 +240,11 @@ void QGLView::mousePressEvent(QMouseEvent *event)
 #else
   last_mouse = event->globalPos();
 #endif
+
+  // Middle-button drag pans the view — use a grabbing-hand cursor.
+  if (event->button() == Qt::MiddleButton) {
+    setCursor(Qt::ClosedHandCursor);
+  }
 }
 
 /*
@@ -347,8 +354,11 @@ void QGLView::mouseMoveEvent(QMouseEvent *event)
     this->shown_obj = findObject(pt.x(), pt.y());
     update();
   }
-  double dx = (this_mouse.x() - last_mouse.x()) * 0.7;
-  double dy = (this_mouse.y() - last_mouse.y()) * 0.7;
+  double raw_dx = this_mouse.x() - last_mouse.x();
+  double raw_dy = this_mouse.y() - last_mouse.y();
+  // Soften rotation / zoom-from-drag; pan uses raw pixels for 1:1 cursor tracking.
+  double dx = raw_dx * 0.7;
+  double dy = raw_dy * 0.7;
   if (mouse_drag_active) {
     mouse_drag_moved = true;
 
@@ -387,6 +397,13 @@ void QGLView::mouseMoveEvent(QMouseEvent *event)
       float *selectedMouseActions =
         &this->mouseActions[MouseConfig::ACTION_DIMENSION * (buttonIndex + modifierIndex * 3)];
 
+      // Grabbing-hand middle-drag always pans in the view plane (left/right & up/down),
+      // matching ClosedHandCursor — even if an older setting still maps middle to fore/back.
+      if (buttonIndex == 1 && modifierIndex == 0) {
+        selectedMouseActions =
+          MouseConfig::viewActionArrays.at(MouseConfig::PAN_LR_UD).data();
+      }
+
       // Rotation angles from mouse movement
       // First 6 elements to selectedMouseActions are interpreted as a row-major 3x2 matrix, which is
       // right-multiplied by (dx, dy)^T to produce the rotation angle increments.
@@ -394,28 +411,29 @@ void QGLView::mouseMoveEvent(QMouseEvent *event)
       double ry = selectedMouseActions[2] * dx + selectedMouseActions[3] * dy;
       double rz = selectedMouseActions[4] * dx + selectedMouseActions[5] * dy;
       if (!(rx == 0.0 && ry == 0.0 && rz == 0.0)) {
-        rotate(rx, ry, rz, true);
-        normalizeAngle(cam.object_rot.x());
-        normalizeAngle(cam.object_rot.y());
-        normalizeAngle(cam.object_rot.z());
+        // View-relative orbit (same path as 3D-mouse) feels much more controllable than
+        // accumulating world Euler angles, which gimbal-lock and twist unpredictably.
+        // Soften gain so small hand movements don't overshoot.
+        constexpr double kRotateGain = 0.55;
+        rotate2(rx * kRotateGain, ry * kRotateGain, rz * kRotateGain);
       }
 
-      // Panning from mouse movement
-      // Elements 6..12 of selectedMouseActions are interpreted as another row-major 3x2 matrix, which is
-      // right-multiplied by (dx, dy)^T, and then scaled by the zoom, to produce the translation
-      // increments.
-      double mx = selectedMouseActions[6 + 0] * (dx / QWidget::width()) +
-                  selectedMouseActions[6 + 1] * (dy / QWidget::height());
-      double my = selectedMouseActions[6 + 2] * (dx / QWidget::width()) +
-                  selectedMouseActions[6 + 3] * (dy / QWidget::height());
-      double mz = selectedMouseActions[6 + 4] * (dx / QWidget::width()) +
-                  selectedMouseActions[6 + 5] * (dy / QWidget::height());
+      // Panning: map pixel motion to world units at the look-at plane so the model
+      // tracks the cursor 1:1 (same scale as zoomCursor / ortho frustum height).
+      const int vp_w = std::max(1, QWidget::width());
+      const int vp_h = std::max(1, QWidget::height());
+      const double half_h = cam.zoomValue() * tan_degrees(cam.fov / 2.0);
+      const double half_w = half_h * aspectratio;
+      const double nx = raw_dx / static_cast<double>(vp_w);
+      const double ny = raw_dy / static_cast<double>(vp_h);
+      const double span_w = 2.0 * half_w;
+      const double span_h = 2.0 * half_h;
+      double mx = selectedMouseActions[6 + 0] * nx * span_w + selectedMouseActions[6 + 1] * ny * span_h;
+      double my = selectedMouseActions[6 + 2] * nx * span_w + selectedMouseActions[6 + 3] * ny * span_h;
+      double mz = selectedMouseActions[6 + 4] * nx * span_w + selectedMouseActions[6 + 5] * ny * span_h;
       if (!(mx == 0.0 && my == 0.0 && mz == 0.0)) {
-        mx *= 3.0 * cam.zoomValue();
-        my *= 3.0 * cam.zoomValue();
-        mz *= 3.0 * cam.zoomValue();
+        translate(mx, my, mz, true);
       }
-      translate(mx, my, mz, true);
 
       // Zoom from mouse movement
       // Final 2 elements of selectedMouseActions are interpreted as a 2-dimensional vector. The inner
@@ -434,6 +452,10 @@ void QGLView::mouseReleaseEvent(QMouseEvent *event)
 {
   mouse_drag_active = false;
   releaseMouse();
+
+  if (!(event->buttons() & Qt::MiddleButton)) {
+    unsetCursor();
+  }
 
   if (!mouse_drag_moved) {
     if (event->button() == Qt::RightButton) {
@@ -464,7 +486,24 @@ bool QGLView::save(const char *filename) const
 void QGLView::wheelEvent(QWheelEvent *event)
 {
   const auto pos = Q_WHEEL_EVENT_POSITION(event);
-  const int v = event->angleDelta().y();
+
+  // Mouse wheels usually report angleDelta (120 per notch).
+  // macOS trackpads often report pixelDelta with angleDelta == 0.
+  int v = event->angleDelta().y();
+  if (v == 0) v = event->angleDelta().x();
+  if (v == 0) {
+    const QPoint pixels = event->pixelDelta();
+    if (!pixels.isNull()) {
+      const int px = pixels.y() != 0 ? pixels.y() : pixels.x();
+      // Scale pixel scroll into wheel-notch units used by Camera::zoom()
+      v = px * 4;
+    }
+  }
+  if (v == 0) {
+    event->ignore();
+    return;
+  }
+
   if (QApplication::keyboardModifiers() & Qt::ShiftModifier) {
     zoomFov(v);
   } else if (this->mouseCentricZoom) {
@@ -472,6 +511,34 @@ void QGLView::wheelEvent(QWheelEvent *event)
   } else {
     zoom(v, true);
   }
+  event->accept();
+}
+
+bool QGLView::event(QEvent *event)
+{
+  // Trackpad pinch-to-zoom (macOS / some other platforms)
+  if (event->type() == QEvent::NativeGesture) {
+    auto *gesture = static_cast<QNativeGestureEvent *>(event);
+    if (gesture->gestureType() == Qt::ZoomNativeGesture) {
+      // gesture->value() is a small relative scale delta (e.g. 0.01)
+      const int v = qRound(gesture->value() * 600.0);
+      if (v != 0) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        const QPointF local = gesture->position();
+#else
+        const QPointF local = gesture->pos();
+#endif
+        if (this->mouseCentricZoom) {
+          zoomCursor(int(local.x()), int(local.y()), v);
+        } else {
+          zoom(v, true);
+        }
+      }
+      event->accept();
+      return true;
+    }
+  }
+  return QOpenGLWidget::event(event);
 }
 
 void QGLView::ZoomIn()

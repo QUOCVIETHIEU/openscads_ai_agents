@@ -351,7 +351,6 @@ jobs:
         type: string
         default: git
     steps:
-      - macos/install-rosetta
       - get_source:
           method: << parameters.source_method >>
       - run:
@@ -387,8 +386,8 @@ jobs:
           command: |
             # Pick up our own Qt
             export PATH=$OPENSCAD_LIBRARIES/bin:$PATH
-            # Build universal binaries and limit to 30 minutes
-            ./scripts/macosx-build-dependencies.sh -l 30 -x -a -d
+            # Build Apple Silicon (arm64) only and limit to 30 minutes
+            ./scripts/macosx-build-dependencies.sh -l 30 -a -d
       - run:
           name: Package Dependencies as an artifact
           command: |

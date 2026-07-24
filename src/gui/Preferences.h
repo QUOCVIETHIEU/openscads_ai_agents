@@ -42,6 +42,8 @@ public:
   void fireEditorConfigChanged() const;
   void fireApplicationFontChanged() const;
   void insertListItem(QListWidget *listBox, QListWidgetItem *listItem);
+  void showAISettings();
+  void reloadAISettingsFromDisk();
 
 public slots:
   void actionTriggered(class QAction *);
@@ -156,20 +158,6 @@ public slots:
   void on_checkBoxAlwaysShowExport3mfDialog_toggled(bool);
   void on_checkBoxAlwaysShowPrintServiceDialog_toggled(bool);
 
-  // AI Config Slots
-  void on_comboBoxAIProfile_currentIndexChanged(int);
-  void on_pushButtonAINewProfile_clicked();
-  void on_pushButtonAIDeleteProfile_clicked();
-  void on_lineEditAIApiEndpoint_textChanged(const QString&);
-  void on_lineEditAIApiKey_textChanged(const QString&);
-  void on_pushButtonAIParamAdd_clicked();
-  void on_pushButtonAIParamRemove_clicked();
-  void on_tableWidgetAIParams_itemChanged(class QTableWidgetItem *item);
-
-private:
-  void loadAIParams(const QString& profileName);
-  void saveAIParams();
-
 signals:
   void requestRedraw() const;
   void updateUndockMode(bool undockMode) const;
@@ -215,6 +203,7 @@ private:
   void setup3DPrintPage();
   void writeSettings();
   void hidePasswords();
+  void setupAIPreferencesPage();
   void addPrefPage(QActionGroup *group, QAction *action, QWidget *widget);
   void createFontSizeMenu(QComboBox *box, const QString& setting);
   void updateGUIFontFamily(QFontComboBox *fontSelector, const QString& setting);
@@ -228,9 +217,7 @@ private:
 
   QSettings::SettingsMap defaultmap;
   QHash<const QAction *, QWidget *> prefPages;
-  nlohmann::json inMemoryAISettings;
-  QTimer *aiSaveTimer = nullptr;
-  QString currentLoadedProfileName;
+  class AISettingsPanel *aiSettingsPanel = nullptr;
   bool printPageSetupDone{false};
 };
 

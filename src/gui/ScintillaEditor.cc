@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QCursor>
 #include <QEvent>
+#include <QFrame>
 #include <QGuiApplication>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QKeyCombination>
@@ -108,6 +109,11 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
   lexer = nullptr;
   scintillaLayout = new QVBoxLayout(this);
   qsci = new QsciScintilla(this);
+  // Flat editor surface — no native 3D/sunken frame around the text area
+  qsci->setFrameShape(QFrame::NoFrame);
+  qsci->setFrameShadow(QFrame::Plain);
+  qsci->setLineWidth(0);
+  qsci->setMidLineWidth(0);
 
   contentsRendered = false;
   findState = 0;  // FIND_HIDDEN
@@ -170,12 +176,19 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
   connect(shortcutAutocomplete, &QShortcut::activated, [=]() { qsci->autoCompleteFromAPIs(); });
   // NOLINTEND(bugprone-suspicious-enum-usage)
 
-  scintillaLayout->setContentsMargins(0, 0, 0, 0);
+  scintillaLayout->setContentsMargins(2, 4, 4, 4);
+  scintillaLayout->setSpacing(0);
   scintillaLayout->addWidget(qsci);
 
   qsci->setUtf8(true);
   qsci->setFolding(QsciScintilla::BoxedTreeFoldStyle, 4);
   qsci->setCaretLineVisible(true);
+
+  // Light inner breathing room around the text body
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETMARGINLEFT, 0ull, 1);
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETMARGINRIGHT, 0ull, 4);
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETEXTRAASCENT, 0);
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETEXTRADESCENT, 0);
 
   qsci->indicatorDefine(QsciScintilla::RoundBoxIndicator, errorIndicatorNumber);
   qsci->indicatorDefine(QsciScintilla::RoundBoxIndicator, findIndicatorNumber);
@@ -469,7 +482,11 @@ void ScintillaEditor::setColormap(const EditorColorScheme *colorScheme)
   try {
     auto font = this->lexer->font(this->lexer->defaultStyle());
     const QColor textColor(pt.get<std::string>("text").c_str());
-    const QColor paperColor(pt.get<std::string>("paper").c_str());
+    QColor paperColor(pt.get<std::string>("paper").c_str());
+    // Match AI chat workbench surface (avoid stark pure-white editor paper)
+    if (paperColor == QColor(Qt::white) || paperColor.name(QColor::HexRgb).toLower() == QLatin1String("#ffffff")) {
+      paperColor = QColor(QStringLiteral("#f8f8f8"));
+    }
 
 #if ENABLE_LEXERTL
 
@@ -665,7 +682,7 @@ void ScintillaEditor::setColormap(const EditorColorScheme *colorScheme)
 
 void ScintillaEditor::noColor()
 {
-  this->lexer->setPaper(Qt::white);
+  this->lexer->setPaper(QColor(QStringLiteral("#f8f8f8")));
   this->lexer->setColor(Qt::black);
   qsci->setCaretWidth(2);
   qsci->setCaretForegroundColor(Qt::black);
@@ -795,9 +812,9 @@ void ScintillaEditor::onTextChanged()
 {
   auto enableLineNumbers = Settings::Settings::enableLineNumbers.value();
   if (enableLineNumbers) {
-    qsci->setMarginWidth(numberMargin, QString(trunc(log10(qsci->lines()) + 2), '0'));
+    qsci->setMarginWidth(numberMargin, QString(trunc(log10(qsci->lines()) + 3), '0'));
   } else {
-    qsci->setMarginWidth(numberMargin, 6);
+    qsci->setMarginWidth(numberMargin, 8);
   }
   qsci->setMarginLineNumbers(numberMargin, enableLineNumbers);
 }

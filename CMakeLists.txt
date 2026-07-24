@@ -38,7 +38,7 @@ configure_file(
 option(INFO "Display build configuration info at end of cmake config" ON)
 option(ENABLE_TESTS "Run testsuite after building." ON)
 option(ENABLE_GUI_TESTS "Compile a special version of the openscad gui with feature for testing." OFF)
-option(EXPERIMENTAL "Enable Experimental Features" OFF)
+option(EXPERIMENTAL "Enable Experimental Features" ON)
 option(USE_MANIFOLD_TRIANGULATOR "Use Manifold's triangulator instead of CGAL's" ON)
 option(USE_MANIFOLD_MINKOWSKI "Use Manifold's Minkowski instead of CGAL's" OFF)
 option(USE_BUILTIN_MANIFOLD "Use manifold from submodule" ON)
@@ -99,6 +99,13 @@ project(OpenSCAD
   HOMEPAGE_URL "https://openscad.org/"
   LANGUAGES C CXX
 )
+
+# This fork supports Apple Silicon only (no Intel / universal macOS binaries).
+# Skip when cross-compiling to Emscripten (WASM) even on a Darwin host.
+if(APPLE AND NOT EMSCRIPTEN)
+  set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "macOS architectures (Apple Silicon only)" FORCE)
+  message(STATUS "macOS: forcing CMAKE_OSX_ARCHITECTURES=arm64 (Apple Silicon only)")
+endif()
 
 # GNUInstallDirs must be done before BuildParameters
 include(GNUInstallDirs)
@@ -1359,6 +1366,8 @@ set(GUI_SOURCES
   src/gui/ai/AIDock.cc
   src/gui/ai/ChatWidget.cc
   src/gui/ai/ChatInputEdit.cc
+  src/gui/ai/AISettingsPanel.cc
+  src/gui/ai/AIApiKeyDialog.cc
   ${INPUT_DRIVER_SOURCES}
   )
 
@@ -1432,8 +1441,9 @@ set(GUI_HEADERS
     src/gui/ai/AIDock.h
     src/gui/ai/ChatWidget.h
     src/gui/ai/DiffDialog.h
-    src/gui/ai/CollapsibleBubble.h
     src/gui/ai/ChatInputEdit.h
+    src/gui/ai/AISettingsPanel.h
+    src/gui/ai/AIApiKeyDialog.h
 )
 
 # To be added in Source for QtCreator to show them in project tree

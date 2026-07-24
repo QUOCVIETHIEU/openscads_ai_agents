@@ -1,11 +1,45 @@
 #include "AIService.h"
 
+std::string AIService::defaultSystemPrompt()
+{
+  return
+    "You are the OpenSCAD Expert Assistant. You provide high-quality, surgical, and logical OpenSCAD "
+    "code fixes.\n\n"
+    "### YOUR CORE RULES:\n"
+    "1. **Surgical Excellence**: If the user has a minor error (missing semicolon, wrong bracket), fix "
+    "ONLY that specific line. Do NOT rewrite the entire script, do NOT rename variables, and do NOT "
+    "change the overall logic unless explicitly asked.\n"
+    "2. **OpenSCAD Syntax Mastery**:\n"
+    "   - **Modifiers**: `color()`, `rotate()`, `translate()`, etc., are MODIFIERS. They apply to the "
+    "next child or block. NEVER assign them to variables like `c = color(\"red\");`. Instead, use "
+    "`color(\"red\") cube(10);`.\n"
+    "   - **Semicolons**: Every assignment (e.g., `x = 5;`) and every module instantiation (e.g., "
+    "`cube(10);`) MUST end with a semicolon. Semicolons are NOT used after module definitions `module "
+    "name() { ... }` or after blocks `{ ... }`.\n"
+    "3. **Tool Workflow**:\n"
+    "   - YOU MUST USE `set_editor_code` to apply any code changes. This updates the editor; the 3D "
+    "preview runs once when your final reply finishes. Put the full script only in that tool call — "
+    "never in chat.\n"
+    "   - Use `get_editor_code()` if you need to see the latest script state.\n"
+    "   - Use `trigger_preview()` only if you need to re-queue a preview without changing code; it "
+    "still runs once at the end of the turn.\n"
+    "4. **Chat replies (NO CODE)**:\n"
+    "   - After applying code, reply with a short design description only: intent, key dimensions, "
+    "features, and how the user can tweak parameters if useful.\n"
+    "   - Do NOT paste OpenSCAD source into chat. Do NOT use fenced code blocks for the script. "
+    "Do NOT repeat the editor contents. Keep replies concise — no long filler.\n"
+    "5. **Formatting**: Use ACTUAL NEWLINES inside tool arguments for code. Never use literal '\\n' "
+    "sequences in `set_editor_code`.\n"
+    "6. **Tone**: Technical, concise, and helpful.";
+}
+
 #ifndef __EMSCRIPTEN__
 
 #include "HTTPClient.h"
 #include "AIClient.h"
 #include "platform/PlatformUtils.h"
 #include "json/json.hpp"
+#include <cmath>
 #include <fstream>
 #include <cstdlib>
 
@@ -21,6 +55,58 @@ static std::string getAISettingsPath()
     }
   }
   return configPath + "/ai_settings.json";
+}
+
+// Ensure chat replies describe the design only — code goes to the editor via tools.
+static void appendMandatoryChatReplyRule(std::string& sys_prompt)
+{
+  constexpr const char *kMarker = "### CHAT REPLY (MANDATORY):";
+  if (sys_prompt.find(kMarker) != std::string::npos) {
+    return;
+  }
+  sys_prompt +=
+    "\n\n### CHAT REPLY (MANDATORY):\n"
+    "Do NOT paste OpenSCAD source code into the chat (no fenced code blocks, no full scripts, no large "
+    "snippets). Apply all code only via `set_editor_code`. In chat, briefly describe the design — "
+    "dimensions, features, and useful tweaks — in short prose or bullets.";
+}
+
+// Old builds seeded restrictive defaults. Strip those exact values so requests are
+// unrestricted unless the user explicitly configures limits.
+static bool stripLegacyDefaultLimits(nlohmann::json& params)
+{
+  if (!params.is_object()) return false;
+  bool changed = false;
+  if (params.contains("temperature") && params["temperature"].is_number() &&
+      std::fabs(params["temperature"].get<double>() - 0.7) < 1e-9) {
+    params.erase("temperature");
+    changed = true;
+  }
+  if (params.contains("max_tokens")) {
+    const auto& v = params["max_tokens"];
+    const bool match = (v.is_number_integer() && v.get<int>() == 2048) ||
+                       (v.is_number() && std::fabs(v.get<double>() - 2048.0) < 1e-9);
+    if (match) {
+      params.erase("max_tokens");
+      changed = true;
+    }
+  }
+  if (params.contains("context_limit")) {
+    const auto& v = params["context_limit"];
+    const bool match = (v.is_number_integer() && v.get<int>() == 10) ||
+                       (v.is_number() && std::fabs(v.get<double>() - 10.0) < 1e-9);
+    if (match) {
+      params.erase("context_limit");
+      changed = true;
+    }
+  }
+  if (params.contains("default_prompt") && params["default_prompt"].is_string() &&
+      params["default_prompt"].get<std::string>() ==
+        "Create a sphere with radius 10 and detail level $fn=50.") {
+    params.erase("default_prompt");
+    changed = true;
+  }
+  return changed;
 }
 
 static bool loadActiveProfile(AIProfileConfig& config, std::string& error_msg)
@@ -63,6 +149,10 @@ static bool loadActiveProfile(AIProfileConfig& config, std::string& error_msg)
   if (profile.contains("params") && profile["params"].is_object()) {
     auto& params = profile["params"];
     config.model = params.value("model", "");
+    if (config.model.rfind("models/", 0) == 0) {
+      config.model = config.model.substr(7);
+    }
+    stripLegacyDefaultLimits(params);
     config.parameters = params;
   } else {
     config.model = "";
@@ -119,36 +209,15 @@ void AIService::chatCompletionStream(std::vector<ChatMessage>& history, ChunkCal
   }
 
   std::vector<AIChatMessage> ai_history;
-  std::string sys_prompt =
-    "You are the OpenSCAD Expert Assistant. You provide high-quality, surgical, and logical OpenSCAD "
-    "code fixes.\n\n"
-    "### YOUR CORE RULES:\n"
-    "1. **Surgical Excellence**: If the user has a minor error (missing semicolon, wrong bracket), fix "
-    "ONLY that specific line. Do NOT rewrite the entire script, do NOT rename variables, and do NOT "
-    "change the overall logic unless explicitly asked.\n"
-    "2. **OpenSCAD Syntax Mastery**:\n"
-    "   - **Modifiers**: `color()`, `rotate()`, `translate()`, etc., are MODIFIERS. They apply to the "
-    "next child or block. NEVER assign them to variables like `c = color(\"red\");`. Instead, use "
-    "`color(\"red\") cube(10);`.\n"
-    "   - **Semicolons**: Every assignment (e.g., `x = 5;`) and every module instantiation (e.g., "
-    "`cube(10);`) MUST end with a semicolon. Semicolons are NOT used after module definitions `module "
-    "name() { ... }` or after blocks `{ ... }`.\n"
-    "3. **Tool Workflow**:\n"
-    "   - YOU MUST USE `set_editor_code` to propose any code changes so they are set for user review.\n"
-    "   - You can output code blocks in markdown format in the chat for explanation, but you MUST also "
-    "call the `set_editor_code` tool so the changes are set for review and can be applied "
-    "automatically.\n"
-    "   - Use `get_editor_code()` if you need to see the latest script state.\n"
-    "   - Use `trigger_preview()` once after setting the code to validate the result.\n"
-    "4. **Response and Engagement**: Explain the reasoning behind your proposed code changes. Output "
-    "standard text to explain your thoughts and keep the user engaged while proposing code changes via "
-    "tools.\n"
-    "5. **Formatting**: Use ACTUAL NEWLINES in your code output. Never use literal '\\n' sequences.\n"
-    "6. **Tone**: Technical, concise, and helpful. Avoid long conversational filler.";
+  std::string sys_prompt = AIService::defaultSystemPrompt();
 
   if (config.parameters.contains("system_prompt") && config.parameters["system_prompt"].is_string()) {
-    sys_prompt = config.parameters["system_prompt"].get<std::string>();
+    const auto custom = config.parameters["system_prompt"].get<std::string>();
+    if (!custom.empty()) {
+      sys_prompt = custom;
+    }
   }
+  appendMandatoryChatReplyRule(sys_prompt);
 
   bool already_has_system = false;
   if (!history.empty() && history[0].role == "system") {
@@ -163,25 +232,14 @@ void AIService::chatCompletionStream(std::vector<ChatMessage>& history, ChunkCal
     am.role = msg.role;
     am.content = msg.content;
     am.tool_call_id = msg.tool_call_id;
+    am.images = msg.images;
     if (!msg.tool_calls.empty()) {
       try {
         auto tcs_json = nlohmann::json::parse(msg.tool_calls);
         if (tcs_json.is_array()) {
           for (auto& tc_json : tcs_json) {
             AIToolCall tc;
-            if (tc_json.contains("id")) tc.id = tc_json["id"].get<std::string>();
-            if (tc_json.contains("type")) tc.type = tc_json["type"].get<std::string>();
-            if (tc_json.contains("function") && tc_json["function"].is_object()) {
-              auto& fn = tc_json["function"];
-              if (fn.contains("name")) tc.name = fn["name"].get<std::string>();
-              if (fn.contains("arguments")) {
-                if (fn["arguments"].is_string()) {
-                  tc.arguments = fn["arguments"].get<std::string>();
-                } else {
-                  tc.arguments = fn["arguments"].dump();
-                }
-              }
-            }
+            parseAIToolCall(tc_json, tc);
             am.tool_calls.push_back(tc);
           }
         }
@@ -205,14 +263,7 @@ void AIService::chatCompletionStream(std::vector<ChatMessage>& history, ChunkCal
     assistant_msg.content = "";
     nlohmann::json tcs_arr = nlohmann::json::array();
     for (const auto& tc : tool_calls) {
-      nlohmann::json t = nlohmann::json::object();
-      t["id"] = tc.id;
-      t["type"] = "function";
-      nlohmann::json fn = nlohmann::json::object();
-      fn["name"] = tc.name;
-      fn["arguments"] = tc.arguments;
-      t["function"] = fn;
-      tcs_arr.push_back(t);
+      tcs_arr.push_back(serializeAIToolCall(tc));
     }
     assistant_msg.tool_calls = tcs_arr.dump();
     history.push_back(assistant_msg);
@@ -250,35 +301,14 @@ void AIService::chatCompletion(const std::vector<ChatMessage>& history, Response
   }
 
   std::vector<AIChatMessage> ai_history;
-  std::string sys_prompt =
-    "You are the OpenSCAD Expert Assistant. You provide high-quality, surgical, and logical OpenSCAD "
-    "code fixes.\n\n"
-    "### YOUR CORE RULES:\n"
-    "1. **Surgical Excellence**: If the user has a minor error (missing semicolon, wrong bracket), fix "
-    "ONLY that specific line. Do NOT rewrite the entire script, do NOT rename variables, and do NOT "
-    "change the overall logic unless explicitly asked.\n"
-    "2. **OpenSCAD Syntax Mastery**:\n"
-    "   - **Modifiers**: `color()`, `rotate()`, `translate()`, etc., are MODIFIERS. They apply to the "
-    "next child or block. NEVER assign them to variables like `c = color(\"red\");`. Instead, use "
-    "`color(\"red\") cube(10);`.\n"
-    "   - **Semicolons**: Every assignment (e.g., `x = 5;`) and every module instantiation (e.g., "
-    "`cube(10);`) MUST end with a semicolon. Semicolons are NOT used after module definitions `module "
-    "name() { ... }` or after blocks `{ ... }`.\n"
-    "3. **Tool Workflow**:\n"
-    "   - YOU MUST USE `set_editor_code` to propose any code changes so they are set for user review.\n"
-    "   - You can output code blocks in markdown format in the chat for explanation, but you MUST also "
-    "call the `set_editor_code` tool so the changes are set for review and can be applied "
-    "automatically.\n"
-    "   - Use `get_editor_code()` if you need to see the latest script state.\n"
-    "   - Use `trigger_preview()` once after setting the code to validate the result.\n"
-    "4. **Response and Engagement**: Explain the reasoning behind your proposed code changes. Output "
-    "standard text to explain your thoughts and keep the user engaged while proposing code changes via "
-    "tools.\n"
-    "5. **Formatting**: Use ACTUAL NEWLINES in your code output. Never use literal '\\n' sequences.\n"
-    "6. **Tone**: Technical, concise, and helpful. Avoid long conversational filler.";
+  std::string sys_prompt = AIService::defaultSystemPrompt();
   if (config.parameters.contains("system_prompt") && config.parameters["system_prompt"].is_string()) {
-    sys_prompt = config.parameters["system_prompt"].get<std::string>();
+    const auto custom = config.parameters["system_prompt"].get<std::string>();
+    if (!custom.empty()) {
+      sys_prompt = custom;
+    }
   }
+  appendMandatoryChatReplyRule(sys_prompt);
 
   bool already_has_system = false;
   if (!history.empty() && history[0].role == "system") {
@@ -293,25 +323,14 @@ void AIService::chatCompletion(const std::vector<ChatMessage>& history, Response
     am.role = msg.role;
     am.content = msg.content;
     am.tool_call_id = msg.tool_call_id;
+    am.images = msg.images;
     if (!msg.tool_calls.empty()) {
       try {
         auto tcs_json = nlohmann::json::parse(msg.tool_calls);
         if (tcs_json.is_array()) {
           for (auto& tc_json : tcs_json) {
             AIToolCall tc;
-            if (tc_json.contains("id")) tc.id = tc_json["id"].get<std::string>();
-            if (tc_json.contains("type")) tc.type = tc_json["type"].get<std::string>();
-            if (tc_json.contains("function") && tc_json["function"].is_object()) {
-              auto& fn = tc_json["function"];
-              if (fn.contains("name")) tc.name = fn["name"].get<std::string>();
-              if (fn.contains("arguments")) {
-                if (fn["arguments"].is_string()) {
-                  tc.arguments = fn["arguments"].get<std::string>();
-                } else {
-                  tc.arguments = fn["arguments"].dump();
-                }
-              }
-            }
+            parseAIToolCall(tc_json, tc);
             am.tool_calls.push_back(tc);
           }
         }
@@ -344,7 +363,7 @@ std::string AIService::getDefaultPrompt() const
       }
     }
   }
-  return "Create a sphere with radius 10 and detail level $fn=50.";
+  return "";
 }
 
 void AIService::cancelPendingRequests()

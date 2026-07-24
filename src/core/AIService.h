@@ -11,6 +11,8 @@ struct ChatMessage {
   std::string content;
   std::string tool_call_id;
   std::string tool_calls;  // Serialized JSON representation
+  // OpenAI-compat data URLs: "data:image/jpeg;base64,..."
+  std::vector<std::string> images;
 };
 
 class AIService
@@ -40,6 +42,9 @@ public:
 
   // Get default user prompt configured in the active profile settings
   std::string getDefaultPrompt() const;
+
+  // Shared default system prompt for new / reset AI profiles
+  static std::string defaultSystemPrompt();
 
   // Cancel any active AI completion requests
   void cancelPendingRequests();

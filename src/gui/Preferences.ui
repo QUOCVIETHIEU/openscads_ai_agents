@@ -2927,22 +2927,26 @@
       </widget>
       <widget class="QWidget" name="pageAI">
        <layout class="QVBoxLayout" name="verticalLayoutAI">
+        <property name="spacing">
+         <number>12</number>
+        </property>
         <property name="leftMargin">
-         <number>0</number>
+         <number>16</number>
         </property>
         <property name="topMargin">
-         <number>0</number>
+         <number>12</number>
         </property>
         <property name="rightMargin">
-         <number>0</number>
+         <number>16</number>
         </property>
         <property name="bottomMargin">
-         <number>0</number>
+         <number>12</number>
         </property>
         <item>
          <widget class="QLabel" name="labelAIHeader">
           <property name="font">
            <font>
+            <pointsize>16</pointsize>
             <weight>75</weight>
             <bold>true</bold>
            </font>
@@ -2955,7 +2959,7 @@
         <item>
          <widget class="QLabel" name="labelAIUnderDevWarning">
           <property name="text">
-           <string>AI assistant integration is active. Configure your connection profiles and parameters below.</string>
+           <string>Configure connection profiles, model, and prompts for the AI assistant.</string>
           </property>
           <property name="wordWrap">
            <bool>true</bool>
@@ -2973,128 +2977,281 @@
           <property name="widgetResizable">
            <bool>true</bool>
           </property>
+          <property name="horizontalScrollBarPolicy">
+           <enum>Qt::ScrollBarAlwaysOff</enum>
+          </property>
           <widget class="QWidget" name="scrollAreaWidgetContentsAI">
            <property name="geometry">
             <rect>
              <x>0</x>
              <y>0</y>
-             <width>839</width>
-             <height>750</height>
+             <width>800</width>
+             <height>560</height>
             </rect>
            </property>
            <layout class="QVBoxLayout" name="verticalLayoutAIScroll">
+            <property name="spacing">
+             <number>14</number>
+            </property>
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>4</number>
+            </property>
+            <property name="rightMargin">
+             <number>4</number>
+            </property>
+            <property name="bottomMargin">
+             <number>8</number>
+            </property>
             <item>
              <widget class="QGroupBox" name="groupBoxAIProfile">
               <property name="title">
-               <string>Profiles</string>
+               <string>Connection</string>
               </property>
-              <layout class="QGridLayout" name="gridLayoutAIProfile">
-               <item row="0" column="0">
-                <widget class="QLabel" name="labelAIProfile">
-                 <property name="text">
-                  <string>Active Profile</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="0" column="1">
-                <widget class="QComboBox" name="comboBoxAIProfile"/>
-               </item>
-               <item row="0" column="2">
-                <widget class="QPushButton" name="pushButtonAINewProfile">
-                 <property name="text">
-                  <string>New Profile</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="0" column="3">
-                <widget class="QPushButton" name="pushButtonAIDeleteProfile">
-                 <property name="text">
-                  <string>Delete</string>
-                 </property>
-                </widget>
-               </item>
-              </layout>
-             </widget>
-            </item>
-            <item>
-             <widget class="QGroupBox" name="groupBoxAIConfig">
-              <property name="title">
-               <string>API Configuration</string>
-              </property>
-              <layout class="QGridLayout" name="gridLayoutAIConfig">
-               <item row="0" column="0">
-                <widget class="QLabel" name="labelAIApiEndpoint">
-                 <property name="text">
-                  <string>API Endpoint</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="0" column="1">
-                <widget class="QLineEdit" name="lineEditAIApiEndpoint"/>
-               </item>
-               <item row="1" column="0">
-                <widget class="QLabel" name="labelAIApiKey">
-                 <property name="text">
-                  <string>API Key</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="1" column="1">
-                <widget class="QLineEdit" name="lineEditAIApiKey">
-                 <property name="echoMode">
-                  <enum>QLineEdit::Password</enum>
-                 </property>
-                </widget>
-               </item>
-              </layout>
-             </widget>
-            </item>
-            <item>
-             <widget class="QGroupBox" name="groupBoxAISystemPrompt">
-              <property name="title">
-               <string>System Prompt / Instructions</string>
-              </property>
-              <layout class="QVBoxLayout" name="verticalLayoutAISystemPrompt">
+              <layout class="QVBoxLayout" name="verticalLayoutAIConnection">
+               <property name="spacing">
+                <number>10</number>
+               </property>
                <item>
-                <widget class="QPlainTextEdit" name="plainTextEditAISystemPrompt">
-                 <property name="minimumSize">
-                  <size>
-                   <width>0</width>
-                   <height>80</height>
-                  </size>
+                <layout class="QHBoxLayout" name="horizontalLayoutAIProfile">
+                 <property name="spacing">
+                  <number>8</number>
                  </property>
+                 <item>
+                  <widget class="QLabel" name="labelAIProfile">
+                   <property name="minimumSize">
+                    <size>
+                     <width>110</width>
+                     <height>0</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>Profile</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QComboBox" name="comboBoxAIProfile">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                     <horstretch>1</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="pushButtonAINewProfile">
+                   <property name="text">
+                    <string>New</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="pushButtonAIDeleteProfile">
+                   <property name="text">
+                    <string>Delete</string>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+               <item>
+                <widget class="QGroupBox" name="groupBoxAIConfig">
+                 <property name="flat">
+                  <bool>true</bool>
+                 </property>
+                 <property name="title">
+                  <string/>
+                 </property>
+                 <layout class="QGridLayout" name="gridLayoutAIConfig">
+                  <property name="leftMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="topMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="rightMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="bottomMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="horizontalSpacing">
+                   <number>10</number>
+                  </property>
+                  <property name="verticalSpacing">
+                   <number>8</number>
+                  </property>
+                  <item row="0" column="0">
+                   <widget class="QLabel" name="labelAIApiEndpoint">
+                    <property name="minimumSize">
+                     <size>
+                      <width>110</width>
+                      <height>0</height>
+                     </size>
+                    </property>
+                    <property name="text">
+                     <string>Endpoint</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="0" column="1">
+                   <widget class="QLineEdit" name="lineEditAIApiEndpoint">
+                    <property name="placeholderText">
+                     <string>https://generativelanguage.googleapis.com/v1beta/openai</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="1" column="0">
+                   <widget class="QLabel" name="labelAIModel">
+                    <property name="minimumSize">
+                     <size>
+                      <width>110</width>
+                      <height>0</height>
+                     </size>
+                    </property>
+                    <property name="text">
+                     <string>Model</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="1" column="1">
+                   <widget class="QLineEdit" name="lineEditAIModel">
+                    <property name="placeholderText">
+                     <string>e.g. gemini-2.0-flash</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="2" column="0">
+                   <widget class="QLabel" name="labelAIApiKey">
+                    <property name="minimumSize">
+                     <size>
+                      <width>110</width>
+                      <height>0</height>
+                     </size>
+                    </property>
+                    <property name="text">
+                     <string>API Key</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="2" column="1">
+                   <widget class="QLineEdit" name="lineEditAIApiKey">
+                    <property name="echoMode">
+                     <enum>QLineEdit::Password</enum>
+                    </property>
+                    <property name="placeholderText">
+                     <string>Paste your API key</string>
+                    </property>
+                   </widget>
+                  </item>
+                 </layout>
                 </widget>
                </item>
               </layout>
              </widget>
             </item>
             <item>
-             <widget class="QGroupBox" name="groupBoxAIDefaultPrompt">
-              <property name="title">
-               <string>Default User Prompt</string>
+             <layout class="QHBoxLayout" name="horizontalLayoutAIPrompts">
+              <property name="spacing">
+               <number>14</number>
               </property>
-              <layout class="QVBoxLayout" name="verticalLayoutAIDefaultPrompt">
-               <item>
-                <widget class="QPlainTextEdit" name="plainTextEditAIDefaultPrompt">
-                 <property name="minimumSize">
-                  <size>
-                   <width>0</width>
-                   <height>60</height>
-                  </size>
-                 </property>
-                </widget>
-               </item>
-              </layout>
-             </widget>
+              <item>
+               <widget class="QGroupBox" name="groupBoxAISystemPrompt">
+                <property name="title">
+                 <string>System prompt</string>
+                </property>
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+                  <horstretch>3</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <layout class="QVBoxLayout" name="verticalLayoutAISystemPrompt">
+                 <item>
+                  <widget class="QPlainTextEdit" name="plainTextEditAISystemPrompt">
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>100</height>
+                    </size>
+                   </property>
+                   <property name="maximumSize">
+                    <size>
+                     <width>16777215</width>
+                     <height>140</height>
+                    </size>
+                   </property>
+                   <property name="placeholderText">
+                    <string>Instructions for the assistant…</string>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </widget>
+              </item>
+              <item>
+               <widget class="QGroupBox" name="groupBoxAIDefaultPrompt">
+                <property name="title">
+                 <string>Default user prompt</string>
+                </property>
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+                  <horstretch>2</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <layout class="QVBoxLayout" name="verticalLayoutAIDefaultPrompt">
+                 <item>
+                  <widget class="QPlainTextEdit" name="plainTextEditAIDefaultPrompt">
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>100</height>
+                    </size>
+                   </property>
+                   <property name="maximumSize">
+                    <size>
+                     <width>16777215</width>
+                     <height>140</height>
+                    </size>
+                   </property>
+                   <property name="placeholderText">
+                    <string>Optional starter prompt…</string>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </widget>
+              </item>
+             </layout>
             </item>
             <item>
              <widget class="QGroupBox" name="groupBoxAIParams">
               <property name="title">
-               <string>API Parameters</string>
+               <string>Advanced parameters</string>
               </property>
               <layout class="QVBoxLayout" name="verticalLayoutAIParams">
+               <property name="spacing">
+                <number>8</number>
+               </property>
                <item>
                 <widget class="QTableWidget" name="tableWidgetAIParams">
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>96</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>16777215</width>
+                   <height>140</height>
+                  </size>
+                 </property>
                  <property name="columnCount">
                   <number>2</number>
                  </property>
@@ -3102,17 +3259,20 @@
                </item>
                <item>
                 <layout class="QHBoxLayout" name="horizontalLayoutAIParamsButtons">
+                 <property name="spacing">
+                  <number>8</number>
+                 </property>
                  <item>
                   <widget class="QPushButton" name="pushButtonAIParamAdd">
                    <property name="text">
-                    <string>Add Parameter</string>
+                    <string>Add</string>
                    </property>
                   </widget>
                  </item>
                  <item>
                   <widget class="QPushButton" name="pushButtonAIParamRemove">
                    <property name="text">
-                    <string>Remove Parameter</string>
+                    <string>Remove</string>
                    </property>
                   </widget>
                  </item>
@@ -3139,10 +3299,13 @@
               <property name="orientation">
                <enum>Qt::Vertical</enum>
               </property>
+              <property name="sizeType">
+               <enum>QSizePolicy::Minimum</enum>
+              </property>
               <property name="sizeHint" stdset="0">
                <size>
-                <width>20</width>
-                <height>40</height>
+                <width>0</width>
+                <height>0</height>
                </size>
               </property>
              </spacer>
@@ -3328,8 +3491,7 @@
     <bool>true</bool>
    </property>
    <property name="icon">
-    <iconset resource="../../resources/common.qrc">
-     <normaloff>:/icons/prefsFeatures.png</normaloff>:/icons/prefsFeatures.png</iconset>
+    <iconset theme="chokusen-bot-ai"/>
    </property>
    <property name="text">
     <string>AI</string>

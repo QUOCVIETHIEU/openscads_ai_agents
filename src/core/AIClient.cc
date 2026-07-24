@@ -1,7 +1,9 @@
 #include "AIClient.h"
 #include "HTTPClient.h"
+#include <algorithm>
 #include <cctype>
 #include <sstream>
+#include <unordered_set>
 
 class SSEParser
 {
@@ -34,10 +36,26 @@ public:
 
   const std::vector<AIToolCall>& toolCalls() const { return tool_calls_; }
 
+  void finalizeToolCalls()
+  {
+    if (pending_extra_content_.is_object() && !tool_calls_.empty()) {
+      if (!toolCallHasThoughtSignature(tool_calls_.front())) {
+        extractThoughtSignatureFields(nlohmann::json{{"extra_content", pending_extra_content_}},
+                                      tool_calls_.front());
+      }
+    }
+    // Drop trailing empty placeholders from sparse index assignment.
+    while (!tool_calls_.empty() && tool_calls_.back().id.empty() && tool_calls_.back().name.empty() &&
+           tool_calls_.back().arguments.empty()) {
+      tool_calls_.pop_back();
+    }
+  }
+
 private:
   std::string buffer_;
   TextCallback callback_;
   std::vector<AIToolCall> tool_calls_;
+  nlohmann::json pending_extra_content_;
 
   void processLine(const std::string& line)
   {
@@ -84,30 +102,60 @@ private:
               matched = true;
             }
           }
+          if (delta.contains("extra_content") && delta["extra_content"].is_object()) {
+            if (!pending_extra_content_.is_object()) {
+              pending_extra_content_ = nlohmann::json::object();
+            }
+            for (auto it = delta["extra_content"].begin(); it != delta["extra_content"].end(); ++it) {
+              pending_extra_content_[it.key()] = it.value();
+            }
+          }
           if (delta.contains("tool_calls") && delta["tool_calls"].is_array()) {
             for (auto& tc : delta["tool_calls"]) {
-              if (tc.is_object()) {
-                size_t index = tc.value("index", 0);
-                if (tool_calls_.size() <= index) {
-                  tool_calls_.resize(index + 1);
+              if (!tc.is_object()) continue;
+
+              size_t index = 0;
+              if (tc.contains("index") && tc["index"].is_number_integer()) {
+                index = tc["index"].get<size_t>();
+              } else if (tc.contains("id") && tc["id"].is_string()) {
+                const std::string id = tc["id"].get<std::string>();
+                auto it = std::find_if(tool_calls_.begin(), tool_calls_.end(),
+                                       [&id](const AIToolCall& existing) { return existing.id == id; });
+                if (it != tool_calls_.end()) {
+                  index = static_cast<size_t>(std::distance(tool_calls_.begin(), it));
+                } else if (!tool_calls_.empty() && tool_calls_.back().id.empty()) {
+                  index = tool_calls_.size() - 1;
+                } else {
+                  index = tool_calls_.size();
                 }
-                auto& dest = tool_calls_[index];
-                if (tc.contains("id")) {
-                  dest.id = tc["id"].get<std::string>();
+              } else if (!tool_calls_.empty()) {
+                index = tool_calls_.size() - 1;
+              }
+
+              if (tool_calls_.size() <= index) {
+                tool_calls_.resize(index + 1);
+              }
+              auto& dest = tool_calls_[index];
+              if (tc.contains("id") && tc["id"].is_string()) {
+                dest.id = tc["id"].get<std::string>();
+              }
+              if (tc.contains("type") && tc["type"].is_string()) {
+                dest.type = tc["type"].get<std::string>();
+              }
+              if (tc.contains("function") && tc["function"].is_object()) {
+                auto& fn = tc["function"];
+                if (fn.contains("name") && fn["name"].is_string()) {
+                  dest.name = fn["name"].get<std::string>();
                 }
-                if (tc.contains("type")) {
-                  dest.type = tc["type"].get<std::string>();
-                }
-                if (tc.contains("function") && tc["function"].is_object()) {
-                  auto& fn = tc["function"];
-                  if (fn.contains("name")) {
-                    dest.name = fn["name"].get<std::string>();
-                  }
-                  if (fn.contains("arguments")) {
+                if (fn.contains("arguments")) {
+                  if (fn["arguments"].is_string()) {
                     dest.arguments += fn["arguments"].get<std::string>();
+                  } else {
+                    dest.arguments += fn["arguments"].dump();
                   }
                 }
               }
+              extractThoughtSignatureFields(tc, dest);
             }
           }
         }
@@ -133,25 +181,7 @@ private:
         if (message.contains("tool_calls") && message["tool_calls"].is_array()) {
           for (auto& tc : message["tool_calls"]) {
             AIToolCall tool_call;
-            if (tc.contains("id")) {
-              tool_call.id = tc["id"].get<std::string>();
-            }
-            if (tc.contains("type")) {
-              tool_call.type = tc["type"].get<std::string>();
-            }
-            if (tc.contains("function") && tc["function"].is_object()) {
-              auto& fn = tc["function"];
-              if (fn.contains("name")) {
-                tool_call.name = fn["name"].get<std::string>();
-              }
-              if (fn.contains("arguments")) {
-                if (fn["arguments"].is_string()) {
-                  tool_call.arguments = fn["arguments"].get<std::string>();
-                } else {
-                  tool_call.arguments = fn["arguments"].dump();
-                }
-              }
-            }
+            parseAIToolCall(tc, tool_call);
             tool_calls_.push_back(tool_call);
           }
         }
@@ -213,7 +243,8 @@ nlohmann::json getOpenSCADTools()
   nlohmann::json sec_fn = nlohmann::json::object();
   sec_fn["name"] = "set_editor_code";
   sec_fn["description"] =
-    "Propose changes to the current script in the editor. Use this to update the script.";
+    "Apply complete OpenSCAD source code to the editor. The 3D preview renders once when the assistant "
+    "reply finishes.";
   nlohmann::json sec_params = nlohmann::json::object();
   sec_params["type"] = "object";
   nlohmann::json sec_props = nlohmann::json::object();
@@ -244,7 +275,8 @@ nlohmann::json getOpenSCADTools()
   nlohmann::json tp_fn = nlohmann::json::object();
   tp_fn["name"] = "trigger_preview";
   tp_fn["description"] =
-    "Compile the current script and render a preview in the 3D viewport to validate the result.";
+    "Queue a compile/preview of the current script. The viewport updates once when the assistant "
+    "reply finishes.";
   nlohmann::json tp_params = nlohmann::json::object();
   tp_params["type"] = "object";
   tp_params["properties"] = nlohmann::json::object();
@@ -255,64 +287,74 @@ nlohmann::json getOpenSCADTools()
   return tools;
 }
 
-void AIClient::sendChatCompletion(const AIProfileConfig& config,
-                                  const std::vector<AIChatMessage>& history,
-                                  ResponseCallback on_response, ErrorCallback on_error)
+// Profile params may include OpenSCAD-only keys (system_prompt, context_limit, …).
+// Providers like Gemini reject unknown fields with HTTP 400 Invalid JSON payload.
+static void mergeApiParameters(nlohmann::json& payload, const nlohmann::json& parameters)
 {
-  nlohmann::json payload = nlohmann::json::object();
-  payload["model"] = config.model;
-  payload["stream"] = false;
+  static const std::unordered_set<std::string> kAllowed = {
+    "temperature", "top_p", "top_k", "n", "stop", "presence_penalty", "frequency_penalty",
+    "logit_bias", "user", "seed", "response_format", "tool_choice", "parallel_tool_calls",
+    "max_tokens", "max_completion_tokens", "max_output_tokens"};
 
+  if (!parameters.is_object()) return;
+  for (auto& el : parameters.items()) {
+    const std::string& key = el.key();
+    if (kAllowed.count(key) == 0) continue;
+    payload[key] = el.value();
+  }
+}
+
+static nlohmann::json buildChatMessages(const std::vector<AIChatMessage>& history,
+                                        bool geminiCompat)
+{
   nlohmann::json messages = nlohmann::json::array();
   for (const auto& msg : history) {
     nlohmann::json m = nlohmann::json::object();
     m["role"] = msg.role;
-    if (!msg.content.empty() || msg.tool_calls.empty()) {
+    if (!msg.images.empty() && msg.role == "user") {
+      nlohmann::json parts = nlohmann::json::array();
+      const std::string text =
+        msg.content.empty() ? std::string("Please analyze the attached image(s).") : msg.content;
+      parts.push_back({{"type", "text"}, {"text", text}});
+      for (const auto& imageUrl : msg.images) {
+        if (imageUrl.empty()) continue;
+        parts.push_back({{"type", "image_url"}, {"image_url", {{"url", imageUrl}}}});
+      }
+      m["content"] = parts;
+    } else if (!msg.content.empty() || msg.tool_calls.empty()) {
       m["content"] = msg.content;
     } else {
       m["content"] = nullptr;
     }
     if (msg.role == "tool") {
       m["tool_call_id"] = msg.tool_call_id;
+      // Gemini OpenAI-compat examples include the function name on tool messages.
+      for (const auto& prev : history) {
+        for (const auto& tc : prev.tool_calls) {
+          if (tc.id == msg.tool_call_id && !tc.name.empty()) {
+            m["name"] = tc.name;
+            break;
+          }
+        }
+        if (m.contains("name")) break;
+      }
     }
     if (!msg.tool_calls.empty()) {
       nlohmann::json tcs = nlohmann::json::array();
-      for (const auto& tc : msg.tool_calls) {
-        nlohmann::json t = nlohmann::json::object();
-        t["id"] = tc.id;
-        t["type"] = "function";
-        nlohmann::json fn = nlohmann::json::object();
-        fn["name"] = tc.name;
-        fn["arguments"] = tc.arguments;
-        t["function"] = fn;
-        tcs.push_back(t);
+      for (size_t i = 0; i < msg.tool_calls.size(); ++i) {
+        // Gemini 3 requires a thought_signature on the first function call of each step.
+        const bool ensureSig = geminiCompat && i == 0;
+        tcs.push_back(serializeAIToolCall(msg.tool_calls[i], ensureSig));
       }
       m["tool_calls"] = tcs;
     }
     messages.push_back(m);
   }
-  payload["messages"] = messages;
-  payload["tools"] = getOpenSCADTools();
+  return messages;
+}
 
-  if (config.parameters.is_object()) {
-    for (auto& el : config.parameters.items()) {
-      const std::string& key = el.key();
-      if (key == "model" || key == "stream" || key == "messages" || key == "tools") {
-        continue;
-      }
-      payload[key] = el.value();
-    }
-  }
-
-  std::string body = payload.dump();
-
-  HTTPClient::Headers headers;
-  headers["Content-Type"] = "application/json";
-  if (!config.apiKey.empty()) {
-    headers["Authorization"] = "Bearer " + config.apiKey;
-  }
-
-  std::string endpoint_url = config.endpoint;
+static std::string resolveChatCompletionsUrl(std::string endpoint_url)
+{
   if (endpoint_url.find("/chat/completions") == std::string::npos &&
       endpoint_url.find("/generate") == std::string::npos &&
       endpoint_url.find("/api/chat") == std::string::npos) {
@@ -322,6 +364,31 @@ void AIClient::sendChatCompletion(const AIProfileConfig& config,
       endpoint_url += "/chat/completions";
     }
   }
+  return endpoint_url;
+}
+
+void AIClient::sendChatCompletion(const AIProfileConfig& config,
+                                  const std::vector<AIChatMessage>& history,
+                                  ResponseCallback on_response, ErrorCallback on_error)
+{
+  const bool geminiCompat = isGeminiOpenAIEndpoint(config.endpoint);
+
+  nlohmann::json payload = nlohmann::json::object();
+  payload["model"] = config.model;
+  payload["stream"] = false;
+  payload["messages"] = buildChatMessages(history, geminiCompat);
+  payload["tools"] = getOpenSCADTools();
+  mergeApiParameters(payload, config.parameters);
+
+  std::string body = payload.dump();
+
+  HTTPClient::Headers headers;
+  headers["Content-Type"] = "application/json";
+  if (!config.apiKey.empty()) {
+    headers["Authorization"] = "Bearer " + config.apiKey;
+  }
+
+  std::string endpoint_url = resolveChatCompletionsUrl(config.endpoint);
 
   impl->http_client->asyncPost(
     endpoint_url, headers, body,
@@ -341,25 +408,7 @@ void AIClient::sendChatCompletion(const AIProfileConfig& config,
               if (msg.contains("tool_calls") && msg["tool_calls"].is_array()) {
                 for (auto& tc : msg["tool_calls"]) {
                   AIToolCall tool_call;
-                  if (tc.contains("id")) {
-                    tool_call.id = tc["id"].get<std::string>();
-                  }
-                  if (tc.contains("type")) {
-                    tool_call.type = tc["type"].get<std::string>();
-                  }
-                  if (tc.contains("function") && tc["function"].is_object()) {
-                    auto& fn = tc["function"];
-                    if (fn.contains("name")) {
-                      tool_call.name = fn["name"].get<std::string>();
-                    }
-                    if (fn.contains("arguments")) {
-                      if (fn["arguments"].is_string()) {
-                        tool_call.arguments = fn["arguments"].get<std::string>();
-                      } else {
-                        tool_call.arguments = fn["arguments"].dump();
-                      }
-                    }
-                  }
+                  parseAIToolCall(tc, tool_call);
                   parsed_tool_calls.push_back(tool_call);
                 }
               }
@@ -394,50 +443,14 @@ void AIClient::sendChatCompletionStream(const AIProfileConfig& config,
                                         ChunkCallback on_chunk, ErrorCallback on_error,
                                         CompleteCallback on_complete)
 {
+  const bool geminiCompat = isGeminiOpenAIEndpoint(config.endpoint);
+
   nlohmann::json payload = nlohmann::json::object();
   payload["model"] = config.model;
   payload["stream"] = true;
-
-  nlohmann::json messages = nlohmann::json::array();
-  for (const auto& msg : history) {
-    nlohmann::json m = nlohmann::json::object();
-    m["role"] = msg.role;
-    if (!msg.content.empty() || msg.tool_calls.empty()) {
-      m["content"] = msg.content;
-    } else {
-      m["content"] = nullptr;
-    }
-    if (msg.role == "tool") {
-      m["tool_call_id"] = msg.tool_call_id;
-    }
-    if (!msg.tool_calls.empty()) {
-      nlohmann::json tcs = nlohmann::json::array();
-      for (const auto& tc : msg.tool_calls) {
-        nlohmann::json t = nlohmann::json::object();
-        t["id"] = tc.id;
-        t["type"] = "function";
-        nlohmann::json fn = nlohmann::json::object();
-        fn["name"] = tc.name;
-        fn["arguments"] = tc.arguments;
-        t["function"] = fn;
-        tcs.push_back(t);
-      }
-      m["tool_calls"] = tcs;
-    }
-    messages.push_back(m);
-  }
-  payload["messages"] = messages;
+  payload["messages"] = buildChatMessages(history, geminiCompat);
   payload["tools"] = getOpenSCADTools();
-
-  if (config.parameters.is_object()) {
-    for (auto& el : config.parameters.items()) {
-      const std::string& key = el.key();
-      if (key == "model" || key == "stream" || key == "messages" || key == "tools") {
-        continue;
-      }
-      payload[key] = el.value();
-    }
-  }
+  mergeApiParameters(payload, config.parameters);
 
   std::string body = payload.dump();
 
@@ -447,33 +460,33 @@ void AIClient::sendChatCompletionStream(const AIProfileConfig& config,
     headers["Authorization"] = "Bearer " + config.apiKey;
   }
 
-  std::string endpoint_url = config.endpoint;
-  if (endpoint_url.find("/chat/completions") == std::string::npos &&
-      endpoint_url.find("/generate") == std::string::npos &&
-      endpoint_url.find("/api/chat") == std::string::npos) {
-    if (!endpoint_url.empty() && endpoint_url.back() == '/') {
-      endpoint_url += "chat/completions";
-    } else {
-      endpoint_url += "/chat/completions";
-    }
-  }
+  std::string endpoint_url = resolveChatCompletionsUrl(config.endpoint);
 
   auto parser = std::make_shared<SSEParser>(on_chunk);
+  // Accumulate non-2xx body so we report one complete error instead of partial chunks.
+  auto error_body = std::make_shared<std::string>();
+  auto error_status = std::make_shared<int>(0);
 
   impl->http_client->asyncPostStream(
     endpoint_url, headers, body,
-    [parser, on_error](int status_code, const std::string& chunk) {
+    [parser, on_error, error_body, error_status](int status_code, const std::string& chunk) {
       if (status_code >= 200 && status_code < 300) {
         parser->feed(chunk);
       } else {
-        if (on_error) {
-          on_error("HTTP status " + std::to_string(status_code) + ": " + chunk);
-        }
+        *error_status = status_code;
+        *error_body += chunk;
       }
     },
     on_error,
-    [parser, on_complete]() {
+    [parser, on_complete, on_error, error_body, error_status]() {
+      if (*error_status != 0) {
+        if (on_error) {
+          on_error("HTTP status " + std::to_string(*error_status) + ": " + *error_body);
+        }
+        return;
+      }
       parser->flush();
+      parser->finalizeToolCalls();
       if (on_complete) {
         on_complete(parser->toolCalls());
       }

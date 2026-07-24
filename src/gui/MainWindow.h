@@ -24,6 +24,7 @@
 #include <QTemporaryFile>
 #include <QTime>
 #include <QTimer>
+#include <QToolButton>
 #include <QUrl>
 #include <QWidget>
 #include <ctime>
@@ -103,6 +104,8 @@ public:
   EditorInterface *activeEditor = nullptr;
   TabManager *tabManager;
   AIDock *aiDock;
+  QToolButton *aiChatRevealButton = nullptr;
+  QWidget *previewHeaderRow = nullptr;
 
   std::shared_ptr<const Geometry> rootGeom;
   std::shared_ptr<Renderer> geomRenderer;
@@ -158,6 +161,9 @@ private:
   void restoreWindowState();
   void openRemainingFiles(const QStringList& filenames);
   void setupAIDock();
+  void applyFlatWorkbenchChrome();
+  void setupAIChatRevealButton();
+  void updateAIChatRevealButton(bool chatHidden);
 
 protected:
   void closeEvent(QCloseEvent *event) override;
@@ -275,6 +281,8 @@ private slots:
   void on_fileShowLibraryFolder_triggered();
   void on_editActionConvertTabsToSpaces_triggered();
   void on_editActionCopy_triggered();
+  void on_editActionCut_triggered();
+  void on_editActionPaste_triggered();
 
   void instantiateRoot();
   void compileDone(bool didchange);
@@ -447,6 +455,9 @@ private:
   static QElapsedTimer *progressThrottle;
   QWidget *lastFocus;  // keep track of active copyable widget (Editor|Console) for global menu action
                        // Edit->Copy
+
+  // Route Cut/Copy/Paste to focused chat/settings fields instead of always the code editor.
+  bool tryFocusedTextEditClipboard(const QString& op);
 
   std::shared_ptr<CSGNode> csgRoot;         // Result of the CSGTreeEvaluator
   std::shared_ptr<CSGNode> normalizedRoot;  // Normalized CSG tree

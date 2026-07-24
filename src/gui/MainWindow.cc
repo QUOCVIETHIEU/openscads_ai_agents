@@ -30,6 +30,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QComboBox>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDockWidget>
@@ -40,6 +41,7 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QFontMetrics>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QKeySequence>
@@ -51,6 +53,7 @@
 #include <QMetaObject>
 #include <QMimeData>
 #include <QMutexLocker>
+#include <QPalette>
 #include <QPoint>
 #include <QProcess>
 #include <QProgressDialog>
@@ -63,13 +66,19 @@
 #include <QStringList>
 #include <QTemporaryFile>
 #include <QTextEdit>
+#include <QPlainTextEdit>
+#include <QLineEdit>
 #include <QTextStream>
 #include <QTime>
 #include <QTimer>
 #include <QToolBar>
+#include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QPainter>
+#include <QPixmap>
+#include <QSizePolicy>
 #include <QByteArray>
 #include <QDataStream>
 #include <QDebug>
@@ -122,6 +131,7 @@
 #include "gui/ColorList.h"
 #include "gui/Dock.h"
 #include "gui/ai/AIDock.h"
+#include "gui/ai/ChatWidget.h"
 #include "gui/Editor.h"
 #include "gui/Export3mfDialog.h"
 #include "gui/ExportPdfDialog.h"
@@ -600,12 +610,21 @@ void MainWindow::updateUndockMode(bool undockMode)
     }
     aiDock->setFeatures(aiDock->features() & ~QDockWidget::DockWidgetFloatable);
   }
+
+  // AI-first layout: editor panel must stay open (no close button)
+  editorDock->setFeatures(editorDock->features() & ~QDockWidget::DockWidgetClosable);
 }
 
 void MainWindow::updateReorderMode(bool reorderMode)
 {
   MainWindow::reorderMode = reorderMode;
   for (auto& [dock, name] : docks) {
+    // AI-first layout: hide Editor + AI Chat dock title bars so chrome
+    // matches VS Code secondary sidebars (internal headers only).
+    if (dock == editorDock || dock == aiDock) {
+      dock->setTitleBarVisibility(false);
+      continue;
+    }
     dock->setTitleBarVisibility(reorderMode);
   }
 }
@@ -2372,6 +2391,10 @@ void MainWindow::updateStatusBar(ProgressWidget *progressWidget)
     if (versionLabel == nullptr) {
       versionLabel =
         new QLabel("OpenSCAD " + QString::fromStdString(std::string(openscad_displayversionnumber)));
+      QFont statusFont = versionLabel->font();
+      statusFont.setPointSize(11);
+      statusFont.setWeight(QFont::Normal);
+      versionLabel->setFont(statusFont);
       sb->addPermanentWidget(this->versionLabel);
     }
   } else {
@@ -2655,12 +2678,73 @@ void MainWindow::actionExportFileFormat(int fmt)
 
 void MainWindow::on_editActionCopy_triggered()
 {
+  if (tryFocusedTextEditClipboard(QStringLiteral("copy"))) {
+    return;
+  }
   auto *c = dynamic_cast<Console *>(lastFocus);
   if (c) {
     c->copy();
   } else {
     tabManager->copy();
   }
+}
+
+void MainWindow::on_editActionCut_triggered()
+{
+  if (tryFocusedTextEditClipboard(QStringLiteral("cut"))) {
+    return;
+  }
+  tabManager->cut();
+}
+
+void MainWindow::on_editActionPaste_triggered()
+{
+  if (tryFocusedTextEditClipboard(QStringLiteral("paste"))) {
+    return;
+  }
+  tabManager->paste();
+}
+
+bool MainWindow::tryFocusedTextEditClipboard(const QString& op)
+{
+  QWidget *focus = QApplication::focusWidget();
+  if (!focus) return false;
+
+  // Keep code-editor shortcuts on the Scintilla tab manager.
+  if (editorDock && (focus == editorDock || editorDock->isAncestorOf(focus))) {
+    return false;
+  }
+
+  if (auto *plain = qobject_cast<QPlainTextEdit *>(focus)) {
+    if (op == QLatin1String("cut")) plain->cut();
+    else if (op == QLatin1String("copy")) plain->copy();
+    else if (op == QLatin1String("paste")) plain->paste();
+    else return false;
+    return true;
+  }
+  if (auto *line = qobject_cast<QLineEdit *>(focus)) {
+    if (op == QLatin1String("cut")) line->cut();
+    else if (op == QLatin1String("copy")) line->copy();
+    else if (op == QLatin1String("paste")) line->paste();
+    else return false;
+    return true;
+  }
+  if (auto *text = qobject_cast<QTextEdit *>(focus)) {
+    if (op == QLatin1String("cut")) text->cut();
+    else if (op == QLatin1String("copy")) text->copy();
+    else if (op == QLatin1String("paste")) text->paste();
+    else return false;
+    return true;
+  }
+  if (op == QLatin1String("copy")) {
+    if (auto *label = qobject_cast<QLabel *>(focus)) {
+      if (label->hasSelectedText()) {
+        QApplication::clipboard()->setText(label->selectedText());
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 void MainWindow::on_editActionCopyViewport_triggered()
@@ -2928,21 +3012,21 @@ void MainWindow::showLink(const QString& link)
 
 void MainWindow::onEditorDockVisibilityChanged(bool isVisible)
 {
-  auto e = (ScintillaEditor *)this->activeEditor;
-  if (isVisible) {
-    e->qsci->setReadOnly(false);
-    e->setupAutoComplete(false);
-    editorDock->raise();
-    tabManager->setFocus();
-  } else {
-    // Workaround manually disabling interactions with editor by setting it
-    // to read-only when not being shown.  This is an upstream bug from Qt
-    // (tracking ticket: https://bugreports.qt.io/browse/QTBUG-82939) and
-    // may eventually get resolved at which point this bit and the stuff in
-    // the else should be removed. Currently known to affect 5.14.1 and 5.15.0
-    e->qsci->setReadOnly(true);
-    e->setupAutoComplete(true);
+  // AI-first layout: never allow closing the editor dock
+  if (!isVisible) {
+    QTimer::singleShot(0, this, [this]() {
+      if (this->editorDock) {
+        this->editorDock->show();
+      }
+    });
+    return;
   }
+
+  auto e = (ScintillaEditor *)this->activeEditor;
+  e->qsci->setReadOnly(false);
+  e->setupAutoComplete(false);
+  editorDock->raise();
+  tabManager->setFocus();
   updateExportActions();
 }
 
@@ -3007,6 +3091,7 @@ void MainWindow::onParametersDockVisibilityChanged(bool isVisible)
 
 void MainWindow::onAIDockVisibilityChanged(bool isVisible)
 {
+  updateAIChatRevealButton(!isVisible);
 }
 
 void MainWindow::onExperimentalChanged()
@@ -3014,7 +3099,10 @@ void MainWindow::onExperimentalChanged()
   bool aiEnabled = Feature::ExperimentalAiFeatures.is_enabled();
   if (this->aiDock) {
     this->aiDock->toggleViewAction()->setVisible(aiEnabled);
-    if (!aiEnabled) {
+    if (aiEnabled) {
+      this->aiDock->show();
+      this->aiDock->raise();
+    } else {
       this->aiDock->hide();
     }
     if (this->navigationMenu) {
@@ -3025,6 +3113,7 @@ void MainWindow::onExperimentalChanged()
       }
     }
   }
+  updateAIChatRevealButton(aiEnabled && this->aiDock && !this->aiDock->isVisible());
 }
 
 void MainWindow::onColorListColorSelected(const QString& selectedColor)
@@ -3481,6 +3570,15 @@ void MainWindow::setupWindow()
   this->setAttribute(Qt::WA_DeleteOnClose);
   scadApp->windowManager.add(this);
   setAcceptDrops(true);
+
+  // Compact editor + preview toolbars (VS Code-style header density)
+  const QSize compactIconSize(16, 16);
+  if (this->editortoolbar) {
+    this->editortoolbar->setIconSize(compactIconSize);
+  }
+  if (this->viewerToolBar) {
+    this->viewerToolBar->setIconSize(compactIconSize);
+  }
 }
 
 /**
@@ -3621,8 +3719,7 @@ void MainWindow::setupEditor(const QStringList& filenames)
   connect(this->editActionUndo, &QAction::triggered, tabManager, &TabManager::undo);
   connect(this->editActionRedo, &QAction::triggered, tabManager, &TabManager::redo);
   connect(this->editActionRedo_2, &QAction::triggered, tabManager, &TabManager::redo);
-  connect(this->editActionCut, &QAction::triggered, tabManager, &TabManager::cut);
-  connect(this->editActionPaste, &QAction::triggered, tabManager, &TabManager::paste);
+  // Cut/Copy/Paste are handled by MainWindow slots so chat/settings fields can use keyboard shortcuts.
 
   connect(this->editActionIndent, &QAction::triggered, tabManager, &TabManager::indentSelection);
   connect(this->editActionUnindent, &QAction::triggered, tabManager, &TabManager::unindentSelection);
@@ -3705,9 +3802,282 @@ void MainWindow::setupAIDock()
 {
   this->aiDock = new AIDock(this);
   addDockWidget(Qt::RightDockWidgetArea, this->aiDock);
-  this->aiDock->hide();
+
+  if (Feature::ExperimentalAiFeatures.is_enabled()) {
+    this->aiDock->show();
+  } else {
+    this->aiDock->hide();
+  }
+  this->aiDock->setTitleBarVisibility(false);
+  this->aiDock->setFeatures(this->aiDock->features() | QDockWidget::DockWidgetClosable);
 
   QObject::connect(this->aiDock, &Dock::visibilityChanged, this, &MainWindow::onAIDockVisibilityChanged);
+  if (ChatWidget *chat = this->aiDock->chatWidget()) {
+    connect(chat, &ChatWidget::collapsedChanged, this, [this](bool collapsed) {
+      updateAIChatRevealButton(collapsed);
+    });
+  }
+
+  setupAIChatRevealButton();
+}
+
+void MainWindow::setupAIChatRevealButton()
+{
+  if (!this->viewerToolBar || this->aiChatRevealButton) return;
+
+  QWidget *barParent = this->viewerToolBar->parentWidget();
+  auto *vlayout = barParent ? qobject_cast<QVBoxLayout *>(barParent->layout()) : nullptr;
+  if (!vlayout) {
+    // Fallback: keep button on toolbar (may overflow into "...")
+    this->aiChatRevealButton = new QToolButton(this->viewerToolBar);
+  } else {
+    const int idx = vlayout->indexOf(this->viewerToolBar);
+    vlayout->removeWidget(this->viewerToolBar);
+
+    this->previewHeaderRow = new QWidget(barParent);
+    this->previewHeaderRow->setObjectName(QStringLiteral("previewHeaderRow"));
+    auto *row = new QHBoxLayout(this->previewHeaderRow);
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(2);
+
+    this->viewerToolBar->setParent(this->previewHeaderRow);
+    row->addWidget(this->viewerToolBar, 1);
+
+    this->aiChatRevealButton = new QToolButton(this->previewHeaderRow);
+    row->addWidget(this->aiChatRevealButton, 0, Qt::AlignVCenter);
+
+    if (idx >= 0) {
+      vlayout->insertWidget(idx, this->previewHeaderRow);
+    } else {
+      vlayout->insertWidget(0, this->previewHeaderRow);
+    }
+  }
+
+  QPixmap pm(32, 32);
+  pm.fill(Qt::transparent);
+  {
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(QColor("#555555"), 2.0, Qt::SolidLine, Qt::SquareCap, Qt::MiterJoin));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(QRectF(5, 6, 22, 20), 2.5, 2.5);
+    p.drawLine(QPointF(20, 6), QPointF(20, 26));
+  }
+
+  this->aiChatRevealButton->setObjectName(QStringLiteral("aiChatRevealButton"));
+  this->aiChatRevealButton->setIcon(QIcon(pm));
+  this->aiChatRevealButton->setIconSize(QSize(16, 16));
+  this->aiChatRevealButton->setFixedSize(28, 28);
+  this->aiChatRevealButton->setAutoRaise(true);
+  this->aiChatRevealButton->setToolTip(_("Show AI chat"));
+  this->aiChatRevealButton->setFocusPolicy(Qt::NoFocus);
+  this->aiChatRevealButton->setCursor(Qt::PointingHandCursor);
+  this->aiChatRevealButton->setVisible(false);
+  this->aiChatRevealButton->setStyleSheet(QStringLiteral(
+    "QToolButton#aiChatRevealButton { border: none; border-radius: 4px; padding: 0px; }"
+    "QToolButton#aiChatRevealButton:hover { background: rgba(0,0,0,0.08); }"));
+
+  connect(this->aiChatRevealButton, &QToolButton::clicked, this, [this]() {
+    if (this->aiDock && this->aiDock->chatWidget()) {
+      this->aiDock->chatWidget()->setCollapsed(false);
+    } else if (this->aiDock) {
+      this->aiDock->show();
+      this->aiDock->raise();
+    }
+  });
+
+  // If we fell back to toolbar parenting, add the widget there
+  if (!this->previewHeaderRow && this->viewerToolBar) {
+    this->viewerToolBar->addWidget(this->aiChatRevealButton);
+  }
+}
+
+void MainWindow::updateAIChatRevealButton(bool chatHidden)
+{
+  const bool show =
+    chatHidden && Feature::ExperimentalAiFeatures.is_enabled() && this->aiChatRevealButton;
+  if (this->aiChatRevealButton) {
+    this->aiChatRevealButton->setVisible(show);
+    if (show) {
+      this->aiChatRevealButton->raise();
+    }
+  }
+}
+
+void MainWindow::applyFlatWorkbenchChrome()
+{
+  // Match editor|preview divider to the thin flat AI chat separator (no 3D bevel).
+  // Editor panel background matches AI chat (#f8f8f8 / #1e1e1e).
+  const bool dark = QApplication::palette().color(QPalette::Window).lightness() < 128;
+  const QString sep = dark ? QStringLiteral("#2b2b2b") : QStringLiteral("#e5e5e5");
+  const QString sepHover = dark ? QStringLiteral("#3c3c3c") : QStringLiteral("#c8c8c8");
+  const QString panelBg = dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8");
+  const QString headerBg = dark ? QStringLiteral("#252526") : QStringLiteral("#f3f3f3");
+
+  setStyleSheet(QStringLiteral(R"(
+    QMainWindow::separator {
+      background: %1;
+      width: 1px;
+      height: 1px;
+    }
+    QMainWindow::separator:hover {
+      background: %2;
+    }
+    QDockWidget {
+      border: none;
+    }
+    QDockWidget > QWidget {
+      background: transparent;
+      border: none;
+    }
+    QWidget#editorDockContents, QWidget#centralwidget, QWidget#mainWidget {
+      border: none;
+      background: %3;
+    }
+    QToolBar#editortoolbar {
+      background: %4;
+      border: none;
+      spacing: 2px;
+    }
+    QStatusBar {
+      background: %3;
+      border: none;
+      border-top: 1px solid %1;
+      min-height: 20px;
+      max-height: 22px;
+      padding: 0px 6px;
+      font-size: 11px;
+      font-weight: normal;
+      color: %6;
+    }
+    QStatusBar QLabel {
+      font-size: 11px;
+      font-weight: normal;
+      color: %6;
+      padding: 0px;
+      margin: 0px;
+    }
+    QStatusBar::item {
+      border: none;
+    }
+    QFrame#find_panel {
+      background: %4;
+      border: none;
+      border-bottom: 1px solid %1;
+    }
+    QFrame#find_panel QComboBox {
+      min-height: 22px;
+      max-height: 22px;
+      padding: 0px 4px 0px 6px;
+      border: 1px solid %1;
+      border-radius: 4px;
+      background: %3;
+      color: %6;
+      font-size: 12px;
+    }
+    QFrame#find_panel QComboBox#findTypeComboBox {
+      min-width: 72px;
+      max-width: 88px;
+    }
+    QFrame#find_panel QComboBox::drop-down {
+      border: none;
+      width: 14px;
+    }
+    QFrame#find_panel QComboBox QAbstractItemView {
+      background: %3;
+      color: %6;
+      border: 1px solid %1;
+      outline: 0;
+      selection-background-color: %7;
+      selection-color: %6;
+      padding: 2px;
+    }
+    QFrame#find_panel QLineEdit {
+      min-height: 22px;
+      max-height: 22px;
+      padding: 1px 6px;
+      border: 1px solid %1;
+      border-radius: 4px;
+      background: %3;
+      color: %6;
+      selection-background-color: %5;
+      font-size: 12px;
+    }
+    QFrame#find_panel QToolButton,
+    QFrame#find_panel QPushButton {
+      min-height: 22px;
+      max-height: 22px;
+      padding: 0px 8px;
+      border: 1px solid %1;
+      border-radius: 4px;
+      background: %3;
+      color: %6;
+      font-size: 12px;
+    }
+    QFrame#find_panel QToolButton#findPrevButton,
+    QFrame#find_panel QToolButton#findNextButton {
+      min-width: 22px;
+      max-width: 22px;
+      min-height: 22px;
+      max-height: 22px;
+      padding: 0px;
+      border-radius: 4px;
+    }
+    QFrame#find_panel QToolButton:hover,
+    QFrame#find_panel QPushButton:hover {
+      background: %2;
+    }
+    QFrame#find_panel QToolButton:pressed,
+    QFrame#find_panel QPushButton:pressed {
+      background: %1;
+    }
+  )")
+                  .arg(sep, sepHover, panelBg, headerBg,
+                       dark ? QStringLiteral("#264f78") : QStringLiteral("#add6ff"),
+                       dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333"),
+                       dark ? QStringLiteral("#094771") : QStringLiteral("#e8e8e8")));
+
+  // Compact find strip margins + readable combo popup (macOS selection contrast)
+  if (auto *grid = find_panel ? qobject_cast<QGridLayout *>(find_panel->layout()) : nullptr) {
+    grid->setContentsMargins(6, 4, 6, 4);
+    grid->setHorizontalSpacing(4);
+    grid->setVerticalSpacing(4);
+    grid->setColumnStretch(0, 0);
+    grid->setColumnStretch(1, 0);
+    grid->setColumnStretch(2, 0);
+    grid->setColumnStretch(3, 0);
+    grid->setColumnStretch(4, 0);
+    grid->setColumnStretch(5, 1);  // leftover space goes right of Done
+  }
+  if (findTypeComboBox) {
+    findTypeComboBox->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    findTypeComboBox->setMaximumWidth(88);
+    findTypeComboBox->setMinimumWidth(72);
+    auto *view = findTypeComboBox->view();
+    if (view) {
+      QPalette pal = view->palette();
+      const QColor text = dark ? QColor("#cccccc") : QColor("#333333");
+      const QColor bg = dark ? QColor("#1e1e1e") : QColor("#ffffff");
+      const QColor sel = dark ? QColor("#094771") : QColor("#e8e8e8");
+      pal.setColor(QPalette::Base, bg);
+      pal.setColor(QPalette::Text, text);
+      pal.setColor(QPalette::WindowText, text);
+      pal.setColor(QPalette::ButtonText, text);
+      pal.setColor(QPalette::HighlightedText, text);
+      pal.setColor(QPalette::Highlight, sel);
+      view->setPalette(pal);
+    }
+  }
+  if (findInputField) {
+    findInputField->setMaximumWidth(240);
+    findInputField->setMinimumWidth(160);
+    findInputField->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+  }
+  if (replaceInputField) {
+    replaceInputField->setMaximumWidth(240);
+    replaceInputField->setMinimumWidth(160);
+    replaceInputField->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+  }
 }
 
 /**
@@ -3717,6 +4087,12 @@ void MainWindow::setup3DView()
 {
   this->qglview->statusLabel = new QLabel(this);
   this->qglview->statusLabel->setMinimumWidth(100);
+  {
+    QFont statusFont = this->qglview->statusLabel->font();
+    statusFont.setPointSize(11);
+    statusFont.setWeight(QFont::Normal);
+    this->qglview->statusLabel->setFont(statusFont);
+  }
   statusBar()->addWidget(this->qglview->statusLabel);
 
   const QSettingsCached settings;
@@ -3812,6 +4188,16 @@ void MainWindow::setupDocks()
   connect(navigationMenu, &QMenu::aboutToHide, this, &MainWindow::onNavigationCloseContextMenu);
   connect(menuWindow, &QMenu::aboutToHide, this, &MainWindow::onNavigationCloseContextMenu);
   windowActionJumpTo->setMenu(navigationMenu);
+
+  // AI-first layout: editor cannot be closed via title button or Window menu
+  editorDock->setFeatures(editorDock->features() & ~QDockWidget::DockWidgetClosable);
+  editorDock->setTitleBarVisibility(false);
+  if (QAction *editorToggle = editorDock->toggleViewAction()) {
+    editorToggle->setVisible(false);
+    editorToggle->setEnabled(false);
+  }
+
+  applyFlatWorkbenchChrome();
 }
 
 /**
@@ -3956,13 +4342,38 @@ void MainWindow::setupMenusAndActions()
     this->findInputField->setText(QApplication::clipboard()->text(QClipboard::FindBuffer));
   }
 
-  this->findPrevButton->setDefaultAction(editActionFindPrevious);
-  this->findNextButton->setDefaultAction(editActionFindNext);
-  connect(this->findDoneButton, &QPushButton::clicked, this, &MainWindow::hideFind);
+  // Compact find strip — theme chevron icons for prev/next
+  auto wireFindNavButton = [](QToolButton *btn, QAction *action, const QIcon& icon) {
+    btn->setText(QString());
+    btn->setIcon(icon);
+    btn->setIconSize(QSize(14, 14));
+    btn->setFixedSize(24, 24);
+    btn->setToolTip(action->toolTip().isEmpty() ? action->text() : action->toolTip());
+    btn->setAutoRaise(true);
+    btn->setCursor(Qt::PointingHandCursor);
+    btn->setFocusPolicy(Qt::NoFocus);
+    btn->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    QObject::connect(btn, &QToolButton::clicked, action, &QAction::trigger);
+  };
+  wireFindNavButton(this->findPrevButton, this->editActionFindPrevious,
+                    QIcon::fromTheme(QStringLiteral("chokusen-prev")));
+  wireFindNavButton(this->findNextButton, this->editActionFindNext,
+                    QIcon::fromTheme(QStringLiteral("chokusen-next")));
+  this->findDoneButton->setText(_("Done"));
+  this->findDoneButton->setAutoRaise(true);
+  this->findDoneButton->setCursor(Qt::PointingHandCursor);
+  this->findDoneButton->setFocusPolicy(Qt::NoFocus);
+  this->findDoneButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  connect(this->findDoneButton, &QToolButton::clicked, this, &MainWindow::hideFind);
   connect(this->replaceButton, &QPushButton::clicked, this, &MainWindow::replace);
   connect(this->replaceAllButton, &QPushButton::clicked, this, &MainWindow::replaceAll);
   connect(this->replaceInputField, &QLineEdit::returnPressed, this->replaceButton,
           [this] { this->replaceButton->animateClick(); });
+  this->replaceButton->setCursor(Qt::PointingHandCursor);
+  this->replaceAllButton->setCursor(Qt::PointingHandCursor);
+  this->replaceButton->setFlat(true);
+  this->replaceAllButton->setFlat(true);
+
   addKeyboardShortCut(this->viewerToolBar->actions());
   addKeyboardShortCut(this->editortoolbar->actions());
 
@@ -3995,8 +4406,16 @@ void MainWindow::setupMenusAndActions()
  */
 void MainWindow::restoreWindowState()
 {
-  const QSettingsCached settings;
-  const auto windowState = settings.value("window/state", QByteArray()).toByteArray();
+  QSettingsCached settings;
+  constexpr int kAiFirstLayoutVersion = 2;
+  const int layoutVersion = settings.value("window/layoutVersion", 0).toInt();
+  const bool forceAiFirstLayout = layoutVersion < kAiFirstLayoutVersion;
+
+  auto windowState = settings.value("window/state", QByteArray()).toByteArray();
+  if (forceAiFirstLayout) {
+    windowState.clear();
+  }
+
   clearCurrentOutput();
   UIUtils::dumpSaveState(windowState);
   setCurrentOutput();
@@ -4010,7 +4429,9 @@ void MainWindow::restoreWindowState()
     setGeometry(screen()->availableGeometry());
   }
 #endif
-  restoreState(windowState);
+  if (!windowState.isEmpty()) {
+    restoreState(windowState);
+  }
 
   if (windowState.size() == 0) {
     /*
@@ -4031,16 +4452,29 @@ void MainWindow::restoreWindowState()
     tabifyDockWidget(fontListDock, colorListDock);
     tabifyDockWidget(colorListDock, animateDock);
     tabifyDockWidget(animateDock, viewportControlDock);
-    tabifyDockWidget(parameterDock, aiDock);
     parameterDock->hide();
-    aiDock->hide();
     errorLogDock->hide();
     fontListDock->hide();
     colorListDock->hide();
     animateDock->hide();
     viewportControlDock->hide();
-    consoleDock->show();
-    consoleDock->raise();
+    consoleDock->hide();
+
+    // AI-first migration: enable AI features and show the chat dock
+    if (forceAiFirstLayout) {
+      settings.setValue("feature/ai-features", true);
+      Feature::enable_feature("ai-features", true);
+    }
+
+    if (Feature::ExperimentalAiFeatures.is_enabled() && this->aiDock) {
+      this->aiDock->show();
+      this->aiDock->raise();
+      onExperimentalChanged();
+    } else if (this->aiDock) {
+      this->aiDock->hide();
+    }
+
+    settings.setValue("window/layoutVersion", kAiFirstLayoutVersion);
   } else {
 #ifdef Q_OS_WIN
     // Try moving the main window into the display range, this
@@ -4061,6 +4495,16 @@ void MainWindow::restoreWindowState()
 #endif  // ifdef Q_OS_WIN
   }
 
+  // Compact toolbar icons to match the AI-first VS Code-style layout
+  if (this->viewerToolBar) {
+    this->viewerToolBar->setIconSize(QSize(16, 16));
+  }
+  if (this->editortoolbar) {
+    this->editortoolbar->setIconSize(QSize(16, 16));
+  }
+
+  // Ensure reveal control matches dock visibility after restoreState()
+  updateAIChatRevealButton(this->aiDock && !this->aiDock->isVisible());
 }
 
 void MainWindow::openRemainingFiles(const QStringList& filenames)
@@ -4074,6 +4518,7 @@ void MainWindow::changeEvent(QEvent *event)
 {
   if (event->type() == QEvent::ThemeChange) {
     setGlobalTheme();
+    applyFlatWorkbenchChrome();
   }
   QMainWindow::changeEvent(event);
 }
