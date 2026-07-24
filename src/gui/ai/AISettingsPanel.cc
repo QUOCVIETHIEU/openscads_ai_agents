@@ -199,7 +199,9 @@ void AISettingsPanel::connectAutoSaveHooks()
 
 QString AISettingsPanel::defaultSystemPrompt() const
 {
-  return QString::fromStdString(AIService::defaultSystemPrompt());
+  const std::string profile =
+    currentProfile.isEmpty() ? std::string() : currentProfile.toStdString();
+  return QString::fromStdString(AIService::systemPromptForProfile(profile));
 }
 
 void AISettingsPanel::buildUi()
@@ -219,7 +221,7 @@ void AISettingsPanel::buildUi()
 
   auto *titleCol = new QVBoxLayout();
   titleCol->setSpacing(1);
-  titleLabel = new QLabel(_("Custom API Key Config"), this);
+  titleLabel = new QLabel(_("AI Settings"), this);
   QFont titleFont = titleLabel->font();
   titleFont.setPointSize(titleFont.pointSize() + 2);
   titleFont.setBold(true);
@@ -711,19 +713,32 @@ void AISettingsPanel::loadSettings()
   }
 
   profileCombo->clear();
+  // Fixed order matching built-in presets (not alphabetical legacy clutter).
+  static const char *kOrdered[] = {"Gemini", "OpenAI", "Claude", "Ollama"};
   QStringList names;
-  for (auto it = settings["profiles"].begin(); it != settings["profiles"].end(); ++it) {
-    names.append(QString::fromStdString(it.key()));
+  for (const char *n : kOrdered) {
+    if (settings["profiles"].contains(n)) {
+      names.append(QString::fromUtf8(n));
+    }
   }
-  names.sort(Qt::CaseInsensitive);
+  // Any unexpected extras (user-created) appear after, sorted.
+  QStringList extras;
+  for (auto it = settings["profiles"].begin(); it != settings["profiles"].end(); ++it) {
+    const QString name = QString::fromStdString(it.key());
+    if (!names.contains(name)) extras.append(name);
+  }
+  extras.sort(Qt::CaseInsensitive);
+  names.append(extras);
+
   if (names.isEmpty()) {
     // ensurePresets should have seeded; keep a hard fallback
     AIFreeAgents::ensurePresets(settings);
     writeSettingsFile(settings);
-    for (auto it = settings["profiles"].begin(); it != settings["profiles"].end(); ++it) {
-      names.append(QString::fromStdString(it.key()));
+    for (const char *n : kOrdered) {
+      if (settings["profiles"].contains(n)) {
+        names.append(QString::fromUtf8(n));
+      }
     }
-    names.sort(Qt::CaseInsensitive);
   }
 
   for (const auto& name : names) {
@@ -758,6 +773,11 @@ void AISettingsPanel::loadProfile(const QString& profileName)
       endpoint = QStringLiteral("http://localhost:11434/v1");
     } else if (profileName.contains(QStringLiteral("OpenAI"), Qt::CaseInsensitive)) {
       endpoint = QStringLiteral("https://api.openai.com/v1");
+    } else if (profileName.contains(QStringLiteral("Claude"), Qt::CaseInsensitive) ||
+               profileName.contains(QStringLiteral("Anthropic"), Qt::CaseInsensitive)) {
+      endpoint = QStringLiteral("https://api.anthropic.com/v1");
+    } else if (profileName.contains(QStringLiteral("Cursor"), Qt::CaseInsensitive)) {
+      endpoint = QStringLiteral("https://api.cursor.com/v1");
     } else {
       endpoint = QStringLiteral("http://localhost:8080/v1");
     }
@@ -771,9 +791,13 @@ void AISettingsPanel::loadProfile(const QString& profileName)
     if (endpoint.contains(QStringLiteral("generativelanguage.googleapis.com"))) {
       model = QStringLiteral("gemini-2.0-flash");
     } else if (profileName.contains(QStringLiteral("Ollama"), Qt::CaseInsensitive)) {
-      model = QStringLiteral("deepseek-coder");
+      model = QStringLiteral("qwen2.5-coder:14b");
     } else if (profileName.contains(QStringLiteral("OpenAI"), Qt::CaseInsensitive)) {
       model = QStringLiteral("gpt-4o");
+    } else if (profileName.contains(QStringLiteral("Claude"), Qt::CaseInsensitive)) {
+      model = QStringLiteral("claude-sonnet-4-5");
+    } else if (profileName.contains(QStringLiteral("Cursor"), Qt::CaseInsensitive)) {
+      model = QStringLiteral("auto");
     } else {
       model = QStringLiteral("custom");
     }
@@ -790,22 +814,16 @@ void AISettingsPanel::loadProfile(const QString& profileName)
   defaultPromptEdit->setPlainText(defaultPrompt);
 
   const QString tierNote = QString::fromStdString(params.value("tier_note", ""));
-  const bool isFree = params.value("tier", "") == "free" ||
-                      profileName.contains(QStringLiteral("Free"), Qt::CaseInsensitive) ||
-                      profileName.contains(QStringLiteral("Ollama"), Qt::CaseInsensitive);
+  const bool isOllama = profileName.contains(QStringLiteral("Ollama"), Qt::CaseInsensitive);
   if (hintLabel) {
     if (!tierNote.isEmpty()) {
       hintLabel->setText(tierNote);
-    } else if (isFree) {
-      hintLabel->setText(_("Free agent preset — paste a free API key (Ollama needs none)."));
     } else {
       hintLabel->setText(_("Connection, prompts, and model parameters."));
     }
   }
-  if (isFree && profileName.contains(QStringLiteral("Ollama"), Qt::CaseInsensitive)) {
+  if (isOllama) {
     apiKeyEdit->setPlaceholderText(_("No API key needed for Ollama"));
-  } else if (isFree) {
-    apiKeyEdit->setPlaceholderText(_("Paste free API key from the provider signup page"));
   } else {
     apiKeyEdit->setPlaceholderText(_("Paste your API key"));
   }

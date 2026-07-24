@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace AIFreeAgents {
 
@@ -59,17 +61,101 @@ bool loadSettingsJson(nlohmann::json& j, std::string& errorMsg)
   return true;
 }
 
-nlohmann::json makeEmptyDefaultProfile()
+struct BuiltInProfile {
+  const char *name;
+  const char *endpoint;
+  const char *model;
+  const char *note;
+};
+
+// Keep in sync with AI Settings profile list.
+constexpr int kProfileBundleVersion = 4;
+
+const BuiltInProfile *builtInProfiles(size_t& count)
+{
+  // Only OpenAI-compatible chat/completions providers. Cursor Cloud API keys
+  // expose /v1/agents (SDK), not POST /v1/chat/completions — do not list here.
+  static const BuiltInProfile presets[] = {
+    {"Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash",
+     "Google Gemini (OpenAI-compatible endpoint)."},
+    {"OpenAI", "https://api.openai.com/v1", "gpt-4o", "OpenAI Chat Completions API."},
+    {"Claude", "https://api.anthropic.com/v1", "claude-sonnet-4-5",
+     "Anthropic Claude. Use an OpenAI-compatible Claude gateway if the native API is not supported."},
+    {"Ollama", "http://localhost:11434/v1", "qwen2.5-coder:14b",
+     "Local Ollama OpenAI-compatible server (usually no API key). Prefer qwen2.5-coder for OpenSCAD."},
+  };
+  count = sizeof(presets) / sizeof(presets[0]);
+  return presets;
+}
+
+bool isBuiltInName(const std::string& name)
+{
+  size_t count = 0;
+  const BuiltInProfile *presets = builtInProfiles(count);
+  for (size_t i = 0; i < count; ++i) {
+    if (name == presets[i].name) return true;
+  }
+  return false;
+}
+
+/*! Map legacy profile names onto a built-in name for key/config migration. */
+std::string mapLegacyToBuiltIn(const std::string& name)
+{
+  const std::string lower = toLower(name);
+  if (lower.find("gemini") != std::string::npos) return "Gemini";
+  if (lower.find("openai") != std::string::npos || lower.find("gpt") != std::string::npos) {
+    return "OpenAI";
+  }
+  if (lower.find("claude") != std::string::npos || lower.find("anthropic") != std::string::npos) {
+    return "Claude";
+  }
+  if (lower.find("ollama") != std::string::npos) return "Ollama";
+  return {};
+}
+
+nlohmann::json makeProfile(const BuiltInProfile& p)
 {
   nlohmann::json profile = nlohmann::json::object();
-  profile["endpoint"] = "https://generativelanguage.googleapis.com/v1beta/openai";
+  profile["endpoint"] = p.endpoint;
   profile["apiKey"] = "";
   nlohmann::json params = nlohmann::json::object();
-  params["model"] = "gemini-3.1-flash-lite";
-  params["system_prompt"] = AIService::defaultSystemPrompt();
+  params["model"] = p.model;
+  params["system_prompt"] = AIService::systemPromptForProfile(p.name);
   params["default_prompt"] = "";
+  params["tier_note"] = p.note;
   profile["params"] = params;
   return profile;
+}
+
+void applyBuiltInDefaults(nlohmann::json& profile, const BuiltInProfile& p, bool forcePrompt)
+{
+  if (!profile.is_object()) {
+    profile = makeProfile(p);
+    return;
+  }
+  if (!profile.contains("endpoint") || !profile["endpoint"].is_string() ||
+      profile["endpoint"].get<std::string>().empty()) {
+    profile["endpoint"] = p.endpoint;
+  }
+  if (!profile.contains("apiKey") || !profile["apiKey"].is_string()) {
+    profile["apiKey"] = "";
+  }
+  if (!profile.contains("params") || !profile["params"].is_object()) {
+    profile["params"] = nlohmann::json::object();
+  }
+  auto& params = profile["params"];
+  if (forcePrompt || !params.contains("model") || !params["model"].is_string() ||
+      params["model"].get<std::string>().empty()) {
+    params["model"] = p.model;
+  }
+  if (forcePrompt || !params.contains("system_prompt") || !params["system_prompt"].is_string() ||
+      params["system_prompt"].get<std::string>().empty()) {
+    params["system_prompt"] = AIService::systemPromptForProfile(p.name);
+  }
+  if (!params.contains("default_prompt")) {
+    params["default_prompt"] = "";
+  }
+  params["tier_note"] = p.note;
 }
 
 }  // namespace
@@ -85,25 +171,77 @@ bool ensurePresets(nlohmann::json& settings)
   auto& profiles = settings["profiles"];
   bool changed = false;
 
-  if (!profiles.contains("Default") || !profiles["Default"].is_object()) {
-    profiles["Default"] = makeEmptyDefaultProfile();
+  size_t count = 0;
+  const BuiltInProfile *presets = builtInProfiles(count);
+
+  int installedBundle = 0;
+  if (settings.contains("profileBundleVersion") &&
+      settings["profileBundleVersion"].is_number_integer()) {
+    installedBundle = settings["profileBundleVersion"].get<int>();
+  }
+  const bool refreshBundle = installedBundle < kProfileBundleVersion;
+
+  // Capture legacy keys before pruning so we can migrate into built-ins.
+  std::unordered_map<std::string, std::string> legacyKeys;
+  for (auto it = profiles.begin(); it != profiles.end(); ++it) {
+    if (!it.value().is_object()) continue;
+    const std::string key = it.value().value("apiKey", "");
+    if (key.empty()) continue;
+    const std::string mapped = mapLegacyToBuiltIn(it.key());
+    if (!mapped.empty() && !legacyKeys.count(mapped)) {
+      legacyKeys[mapped] = key;
+    }
+  }
+
+  // Ensure exactly the built-in set exists.
+  for (size_t i = 0; i < count; ++i) {
+    const auto& p = presets[i];
+    if (!profiles.contains(p.name) || !profiles[p.name].is_object()) {
+      profiles[p.name] = makeProfile(p);
+      changed = true;
+    } else if (refreshBundle) {
+      applyBuiltInDefaults(profiles[p.name], p, /*forcePrompt=*/true);
+      changed = true;
+    }
+    if (profiles[p.name].value("apiKey", "").empty()) {
+      auto leg = legacyKeys.find(p.name);
+      if (leg != legacyKeys.end() && !leg->second.empty()) {
+        profiles[p.name]["apiKey"] = leg->second;
+        changed = true;
+      }
+    }
+  }
+
+  // Drop everything else (OpenRouter Free, Groq, Default, NVIDIA, …).
+  std::vector<std::string> toErase;
+  for (auto it = profiles.begin(); it != profiles.end(); ++it) {
+    if (!isBuiltInName(it.key())) {
+      toErase.push_back(it.key());
+    }
+  }
+  for (const auto& name : toErase) {
+    profiles.erase(name);
+    changed = true;
+  }
+
+  if (refreshBundle) {
+    settings["profileBundleVersion"] = kProfileBundleVersion;
     changed = true;
   }
 
   if (!settings.contains("activeProfile") || !settings["activeProfile"].is_string() ||
       settings["activeProfile"].get<std::string>().empty() ||
       !profiles.contains(settings["activeProfile"].get<std::string>())) {
-    settings["activeProfile"] = profiles.contains("Default") ? "Default"
-                                                             : profiles.begin().key();
+    settings["activeProfile"] = "Gemini";
     changed = true;
   }
 
   return changed;
 }
 
-bool requiresApiKey(const std::string& /*profileName*/)
+bool requiresApiKey(const std::string& profileName)
 {
-  return true;
+  return toLower(profileName).find("ollama") == std::string::npos;
 }
 
 std::string readProfileApiKey(const std::string& profileName)
@@ -123,6 +261,28 @@ std::string activeProfileName()
   if (!loadSettingsJson(j, err)) return {};
   if (!j.contains("activeProfile") || !j["activeProfile"].is_string()) return {};
   return j["activeProfile"].get<std::string>();
+}
+
+std::string activeModelName()
+{
+  nlohmann::json j;
+  std::string err;
+  if (!loadSettingsJson(j, err)) return {};
+  if (!j.contains("activeProfile") || !j["activeProfile"].is_string()) return {};
+  const std::string profileName = j["activeProfile"].get<std::string>();
+  if (!j.contains("profiles") || !j["profiles"].is_object()) return profileName;
+  if (!j["profiles"].contains(profileName) || !j["profiles"][profileName].is_object()) {
+    return profileName;
+  }
+  const auto& profile = j["profiles"][profileName];
+  if (profile.contains("params") && profile["params"].is_object()) {
+    std::string model = profile["params"].value("model", "");
+    if (model.rfind("models/", 0) == 0) {
+      model = model.substr(7);
+    }
+    if (!model.empty()) return model;
+  }
+  return profileName;
 }
 
 bool isLimitError(int statusCode, const std::string& responseBody)
@@ -171,6 +331,20 @@ bool isAuthError(int statusCode, const std::string& responseBody)
 std::string formatHttpError(int statusCode, const std::string& responseBody)
 {
   const std::string detail = truncate(responseBody, 500);
+  const std::string lower = toLower(responseBody);
+
+  if (statusCode == 404 &&
+      (lower.find("chat/completions") != std::string::npos ||
+       lower.find("route post:/v1/chat/completions") != std::string::npos)) {
+    return std::string(
+             "This endpoint does not support OpenAI chat completions.\n"
+             "OpenSCAD Cad Agent needs POST /v1/chat/completions "
+             "(Gemini, OpenAI, Claude gateway, or Ollama).\n"
+             "Cursor API keys use /v1/agents instead and cannot be used here — "
+             "switch profile in AI Settings.\n\n"
+             "HTTP ") +
+           std::to_string(statusCode) + ": " + detail;
+  }
 
   if (isLimitError(statusCode, responseBody)) {
     return std::string(

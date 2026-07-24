@@ -609,7 +609,6 @@ void ChatWidget::onSendPressed()
 
   auto alive = this->aliveState;
 
-  applyComposerAgentOverride();
   aiService->chatCompletionStream(
     history,
     [this, alive](const std::string& chunk) {
@@ -623,10 +622,10 @@ void ChatWidget::onSendPressed()
       QMetaObject::invokeMethod(qApp, [this, alive, error_msg]() {
         if (!*alive || !isRequestRunning) return;
         QString display_err = QString::fromStdString(error_msg);
-        if (display_err.contains(QStringLiteral("Free limit reached"), Qt::CaseInsensitive) ||
+        if (display_err.contains(QStringLiteral("API limit reached"), Qt::CaseInsensitive) ||
             display_err.contains(QStringLiteral("rate limited"), Qt::CaseInsensitive) ||
             display_err.contains(QStringLiteral("temporarily limited"), Qt::CaseInsensitive)) {
-          display_err = tr("⚠️ Free agent limited\n\n") + display_err;
+          display_err = tr("⚠️ API limited\n\n") + display_err;
         } else if (display_err.contains(QStringLiteral("API key missing"), Qt::CaseInsensitive) ||
                    display_err.contains(QStringLiteral("invalid"), Qt::CaseInsensitive)) {
           display_err = tr("⚠️ API key required\n\n") + display_err;
@@ -642,7 +641,6 @@ void ChatWidget::onSendPressed()
         isRequestRunning = false;
         activeAIBubble = nullptr;
         activeResponseText = nullptr;
-        this->clearComposerAgentOverride();
         this->enableInput(true);
         this->updateComposerActionButton();  // restore Send arrow
       });
@@ -674,7 +672,6 @@ void ChatWidget::onSendPressed()
           isRequestRunning = false;
           activeAIBubble = nullptr;
           activeResponseText = nullptr;
-          this->clearComposerAgentOverride();
           this->enableInput(true);
           this->updateComposerActionButton();
           this->scrollArea->verticalScrollBar()->setValue(
@@ -723,7 +720,6 @@ void ChatWidget::stopActiveRequest(bool keepPartialAssistant)
   pendingPreviewRender = false;
   activeAIBubble = nullptr;
   activeResponseText = nullptr;
-  clearComposerAgentOverride();
   enableInput(true);
   updateComposerActionButton();
 }
@@ -980,6 +976,7 @@ void ChatWidget::onHistoryPressed()
 void ChatWidget::onSettingsPressed()
 {
   AIApiKeyDialog::prompt(this);
+  updateAgentButton();
 }
 
 QDockWidget *ChatWidget::parentDock() const
@@ -1078,316 +1075,39 @@ void ChatWidget::updateAgentButton()
 {
   if (!agentButton) return;
 
-  const bool isApiKey = (composerAgentId == QString::fromUtf8(kApiKeyAgentId));
-  QString label = composerAgentChipLabel(composerAgentId);
-  if (label.size() > 16) {
-    label = label.left(14) + QStringLiteral("…");
+  const QString profile = QString::fromStdString(AIFreeAgents::activeProfileName());
+  QString label = QString::fromStdString(AIFreeAgents::activeModelName());
+  if (label.isEmpty()) {
+    label = profile.isEmpty() ? tr("Model") : profile;
   }
-  // Cursor-style chip: icon + name + chevron
-  agentButton->setText(label + QStringLiteral("  ▾"));
+  if (label.size() > 22) {
+    label = label.left(20) + QStringLiteral("…");
+  }
+  agentButton->setText(label);
   agentButton->setIcon(QIcon::fromTheme(QStringLiteral("chokusen-agent")));
   agentButton->setIconSize(QSize(15, 15));
-  agentButton->setToolTip(
-    isApiKey ? tr("Using your Custom API Key profile")
-             : tr("Using built-in free agent: %1").arg(composerAgentId));
-}
-
-void ChatWidget::selectComposerAgent(const QString& id)
-{
-  if (id.isEmpty()) return;
-  composerAgentId = id;
-  QSettings settings;
-  settings.setValue(QString::fromUtf8(kComposerAgentSettingsKey), composerAgentId);
-  updateAgentButton();
-}
-
-bool ChatWidget::ensureComposerAgentApiKey()
-{
-  std::string profileName;
-  if (composerAgentId == QString::fromUtf8(kApiKeyAgentId)) {
-    profileName = AIFreeAgents::activeProfileName();
+  if (!profile.isEmpty() && profile != label) {
+    agentButton->setToolTip(
+      tr("Model: %1\nProfile: %2\nClick to open AI Settings").arg(label, profile));
   } else {
-    profileName = composerAgentId.toStdString();
+    agentButton->setToolTip(tr("Model: %1\nClick to open AI Settings").arg(label));
   }
-  if (profileName.empty()) return true;
+}
+
+bool ChatWidget::ensureActiveProfileApiKey()
+{
+  const std::string profileName = AIFreeAgents::activeProfileName();
+  if (profileName.empty()) {
+    onSettingsPressed();
+    return !AIFreeAgents::activeProfileName().empty() &&
+           !AIFreeAgents::readProfileApiKey(AIFreeAgents::activeProfileName()).empty();
+  }
   if (!AIFreeAgents::requiresApiKey(profileName)) return true;
 
-  const std::string existing = AIFreeAgents::readProfileApiKey(profileName);
-  if (!existing.empty()) return true;
+  if (!AIFreeAgents::readProfileApiKey(profileName).empty()) return true;
 
-  // Free agents: open the dedicated keys form. AI Settings mode: open full settings.
-  if (composerAgentId == QString::fromUtf8(kApiKeyAgentId)) {
-    onSettingsPressed();
-    return !AIFreeAgents::readProfileApiKey(profileName).empty();
-  }
-
-  FreeApiKeysDialog::prompt(this);
+  onSettingsPressed();
   return !AIFreeAgents::readProfileApiKey(profileName).empty();
-}
-
-void ChatWidget::showAgentPicker()
-{
-  if (!agentButton || isRequestRunning) return;
-
-  const bool dark = isDarkTheme();
-
-  // Transparent host so the drop shadow isn't clipped by the popup chrome.
-  auto *host = new QWidget(nullptr, Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
-  host->setAttribute(Qt::WA_DeleteOnClose);
-  host->setAttribute(Qt::WA_TranslucentBackground);
-
-  auto *popup = new QFrame(host);
-  popup->setObjectName(QStringLiteral("agentPickerPopup"));
-  popup->setMinimumWidth(288);
-  popup->setMaximumWidth(340);
-
-  auto *hostLay = new QVBoxLayout(host);
-  hostLay->setContentsMargins(14, 14, 14, 18);
-  hostLay->setSpacing(0);
-  hostLay->addWidget(popup);
-
-  auto *root = new QVBoxLayout(popup);
-  root->setContentsMargins(6, 6, 6, 6);
-  root->setSpacing(2);
-
-  auto *header = new QLabel(tr("Free agents"), popup);
-  header->setObjectName(QStringLiteral("agentPickerHeader"));
-  root->addWidget(header);
-
-  auto pick = [this, host](const QString& id) {
-    selectComposerAgent(id);
-    host->close();
-  };
-
-  for (const auto& opt : composerAgentOptions()) {
-    QIcon icon;
-    const std::string iconPath = AIFreeAgents::brandIconResource(opt.id.toStdString());
-    if (!iconPath.empty()) {
-      icon = QIcon(QString::fromStdString(iconPath));
-    }
-    auto *row =
-      new AgentPickerRow(opt.id, opt.title, opt.subtitle, opt.id == composerAgentId, icon, popup);
-    row->onActivated = pick;
-    root->addWidget(row);
-  }
-
-  auto *sep = new QFrame(popup);
-  sep->setObjectName(QStringLiteral("agentPickerSep"));
-  sep->setFrameShape(QFrame::NoFrame);
-  sep->setFixedHeight(1);
-  root->addWidget(sep);
-
-  auto *settingsHeader = new QLabel(tr("Custom"), popup);
-  settingsHeader->setObjectName(QStringLiteral("agentPickerHeader"));
-  root->addWidget(settingsHeader);
-
-  auto *apiRow =
-    new AgentPickerRow(QString::fromUtf8(kApiKeyAgentId), tr("Custom API Key"),
-                       tr("Use the profile from Custom API Key Config"),
-                       composerAgentId == QString::fromUtf8(kApiKeyAgentId),
-                       QIcon::fromTheme(QStringLiteral("chokusen-ai-setting")), popup);
-  apiRow->onActivated = pick;
-  root->addWidget(apiRow);
-
-  auto *footerSep = new QFrame(popup);
-  footerSep->setObjectName(QStringLiteral("agentPickerSep"));
-  footerSep->setFrameShape(QFrame::NoFrame);
-  footerSep->setFixedHeight(1);
-  root->addWidget(footerSep);
-
-  auto *freeKeysBtn = new QPushButton(tr("Free API Key Config"), popup);
-  freeKeysBtn->setObjectName(QStringLiteral("agentPickerFooter"));
-  freeKeysBtn->setIcon(QIcon::fromTheme(QStringLiteral("chokusen-ai-setting")));
-  freeKeysBtn->setIconSize(QSize(15, 15));
-  freeKeysBtn->setCursor(Qt::PointingHandCursor);
-  freeKeysBtn->setFlat(true);
-  connect(freeKeysBtn, &QPushButton::clicked, this, [this, host]() {
-    host->close();
-    FreeApiKeysDialog::prompt(this);
-    // Reload default / composer selection if user changed it in the dialog.
-    QSettings settings;
-    const QString saved = settings.value(QString::fromUtf8(kComposerAgentSettingsKey)).toString();
-    if (!saved.isEmpty()) {
-      selectComposerAgent(saved);
-    } else {
-      updateAgentButton();
-    }
-  });
-  root->addWidget(freeKeysBtn);
-
-  auto *settingsBtn = new QPushButton(tr("Custom API Key Config"), popup);
-  settingsBtn->setObjectName(QStringLiteral("agentPickerFooter"));
-  settingsBtn->setIcon(QIcon::fromTheme(QStringLiteral("chokusen-ai-setting")));
-  settingsBtn->setIconSize(QSize(15, 15));
-  settingsBtn->setCursor(Qt::PointingHandCursor);
-  settingsBtn->setFlat(true);
-  connect(settingsBtn, &QPushButton::clicked, this, [this, host]() {
-    host->close();
-    onSettingsPressed();
-  });
-  root->addWidget(settingsBtn);
-
-  if (dark) {
-    popup->setStyleSheet(QStringLiteral(R"(
-      QFrame#agentPickerPopup {
-        background: #252526;
-        border: 1px solid #3c3c3c;
-        border-radius: 12px;
-      }
-      QLabel#agentPickerHeader {
-        color: #8c8c8c;
-        font-size: 10px;
-        font-weight: 400;
-        letter-spacing: 0.2px;
-        padding: 4px 10px 4px 10px;
-      }
-      QFrame#agentPickerRow {
-        background: transparent;
-        border: none;
-        border-radius: 8px;
-      }
-      QFrame#agentPickerRow[hovered="true"] {
-        background: #2a2d2e;
-      }
-      QFrame#agentPickerRow[selected="true"] {
-        background: #2a2d2e;
-      }
-      QLabel#agentPickerTitle {
-        color: #e0e0e0;
-        font-size: 12px;
-        font-weight: 400;
-      }
-      QLabel#agentPickerSubtitle {
-        color: #8c8c8c;
-        font-size: 10px;
-        font-weight: 400;
-      }
-      QLabel#agentPickerCheck {
-        color: #89b4fa;
-        font-size: 12px;
-        font-weight: 400;
-      }
-      QFrame#agentPickerSep {
-        background: #3c3c3c;
-        border: none;
-        margin: 4px 8px;
-        max-height: 1px;
-      }
-      QPushButton#agentPickerFooter {
-        background: transparent;
-        border: none;
-        border-radius: 8px;
-        color: #cccccc;
-        font-size: 12px;
-        font-weight: 400;
-        text-align: left;
-        padding: 8px 12px;
-      }
-      QPushButton#agentPickerFooter:hover {
-        background: #2a2d2e;
-      }
-    )"));
-  } else {
-    popup->setStyleSheet(QStringLiteral(R"(
-      QFrame#agentPickerPopup {
-        background: #ffffff;
-        border: 1px solid #e6e6e6;
-        border-radius: 12px;
-      }
-      QLabel#agentPickerHeader {
-        color: #8a8a8a;
-        font-size: 10px;
-        font-weight: 400;
-        letter-spacing: 0.2px;
-        padding: 4px 10px 4px 10px;
-      }
-      QFrame#agentPickerRow {
-        background: transparent;
-        border: none;
-        border-radius: 8px;
-      }
-      QFrame#agentPickerRow[hovered="true"] {
-        background: #f3f3f3;
-      }
-      QFrame#agentPickerRow[selected="true"] {
-        background: #f5f5f5;
-      }
-      QLabel#agentPickerTitle {
-        color: #1f1f1f;
-        font-size: 12px;
-        font-weight: 400;
-      }
-      QLabel#agentPickerSubtitle {
-        color: #8a8a8a;
-        font-size: 10px;
-        font-weight: 400;
-      }
-      QLabel#agentPickerCheck {
-        color: #3b82f6;
-        font-size: 12px;
-        font-weight: 400;
-      }
-      QFrame#agentPickerSep {
-        background: #ececec;
-        border: none;
-        margin: 4px 8px;
-        max-height: 1px;
-      }
-      QPushButton#agentPickerFooter {
-        background: transparent;
-        border: none;
-        border-radius: 8px;
-        color: #333333;
-        font-size: 12px;
-        font-weight: 400;
-        text-align: left;
-        padding: 8px 12px;
-      }
-      QPushButton#agentPickerFooter:hover {
-        background: #f3f3f3;
-      }
-    )"));
-  }
-
-  auto *shadow = new QGraphicsDropShadowEffect(popup);
-  shadow->setBlurRadius(28);
-  shadow->setOffset(0, 10);
-  shadow->setColor(dark ? QColor(0, 0, 0, 140) : QColor(0, 0, 0, 48));
-  popup->setGraphicsEffect(shadow);
-
-  host->adjustSize();
-  const QPoint btnGlobal = agentButton->mapToGlobal(QPoint(0, 0));
-  // Account for host margins so the card aligns near the chip.
-  QPoint pos(btnGlobal.x() - 18, btnGlobal.y() - host->height() + 6);
-  if (QScreen *screen = QGuiApplication::screenAt(btnGlobal)) {
-    const QRect avail = screen->availableGeometry();
-    if (pos.x() + host->width() > avail.right()) {
-      pos.setX(avail.right() - host->width() - 4);
-    }
-    if (pos.x() < avail.left()) pos.setX(avail.left() + 4);
-    if (pos.y() < avail.top()) {
-      pos.setY(btnGlobal.y() + agentButton->height() - 6);
-    }
-  }
-  host->move(pos);
-  host->show();
-}
-
-void ChatWidget::applyComposerAgentOverride()
-{
-  if (!aiService) return;
-  if (composerAgentId == QString::fromUtf8(kApiKeyAgentId)) {
-    aiService->clearTurnProfileOverride();
-  } else {
-    aiService->setTurnProfileOverride(composerAgentId.toStdString());
-  }
-}
-
-void ChatWidget::clearComposerAgentOverride()
-{
-  if (aiService) {
-    aiService->clearTurnProfileOverride();
-  }
 }
 
 void ChatWidget::updateComposerActionButton()
@@ -1493,8 +1213,8 @@ void ChatWidget::setupCursorComposer()
   agentButton->setFlat(true);
   agentButton->setCursor(Qt::PointingHandCursor);
   agentButton->setFocusPolicy(Qt::NoFocus);
-  agentButton->setToolTip(_("Choose which agent handles this chat"));
-  connect(agentButton, &QPushButton::clicked, this, &ChatWidget::showAgentPicker);
+  agentButton->setToolTip(_("Open AI Settings for the active profile"));
+  connect(agentButton, &QPushButton::clicked, this, &ChatWidget::onSettingsPressed);
   toolbarLayout->addWidget(agentButton);
   toolbarLayout->addStretch(1);
 

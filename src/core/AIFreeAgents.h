@@ -18,6 +18,9 @@ std::string readProfileApiKey(const std::string& profileName);
 /*! Current Settings activeProfile name (empty if unavailable). */
 std::string activeProfileName();
 
+/*! Model id from the active profile params (falls back to profile name). */
+std::string activeModelName();
+
 /*! True when HTTP status/body indicates rate / quota exhaustion. */
 bool isLimitError(int statusCode, const std::string& responseBody);
 

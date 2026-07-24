@@ -46,6 +46,9 @@ public:
   // Shared default system prompt for new / reset AI profiles
   static std::string defaultSystemPrompt();
 
+  // Built-in profile-specific CAD prompts (Gemini / OpenAI / Claude / Cursor / Ollama).
+  static std::string systemPromptForProfile(const std::string& profileName);
+
   // Cancel any active AI completion requests
   void cancelPendingRequests();
 
