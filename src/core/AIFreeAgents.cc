@@ -69,7 +69,7 @@ struct BuiltInProfile {
 };
 
 // Keep in sync with AI Settings profile list.
-constexpr int kProfileBundleVersion = 4;
+constexpr int kProfileBundleVersion = 5;
 
 const BuiltInProfile *builtInProfiles(size_t& count)
 {

@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Rounded app-icon plate -->
+  <rect x="40" y="40" width="944" height="944" rx="220" fill="#FFFFFF"/>
+
+  <!-- Soft ground shadow -->
+  <ellipse cx="520" cy="870" rx="220" ry="38" fill="#1E3A8A" fill-opacity="0.10"/>
+
+  <!-- ===== Isometric CSG cube ===== -->
+  <g transform="translate(520 605)">
+    <path fill="#1E3A8A" d="M0,0 L220,127 L220,381 L0,254 Z"/>
+    <path fill="#2563EB" d="M0,0 L-220,127 L-220,381 L0,254 Z"/>
+    <path fill="#60A5FA" d="M0,-254 L220,-127 L0,0 L-220,-127 Z"/>
+
+    <!-- Cutouts -->
+    <ellipse cx="0" cy="-127" rx="86" ry="50" fill="#FFFFFF"/>
+    <ellipse cx="-110" cy="206" rx="54" ry="31" fill="#FFFFFF"/>
+    <path fill="#FFFFFF" d="M78,160 L160,207 L160,290 L78,243 Z"/>
+
+    <!-- Hole rim rings as filled annuli (outer - inner) via overlapping ellipses -->
+    <ellipse cx="0" cy="-127" rx="94" ry="56" fill="#DBEAFE"/>
+    <ellipse cx="0" cy="-127" rx="80" ry="46" fill="#FFFFFF"/>
+    <ellipse cx="-110" cy="206" rx="60" ry="36" fill="#93C5FD" fill-opacity="0.55"/>
+    <ellipse cx="-110" cy="206" rx="50" ry="28" fill="#FFFFFF"/>
+  </g>
+
+  <!-- ===== AI speech bubble ===== -->
+  <!-- Outer blue shell -->
+  <rect x="140" y="115" width="270" height="215" rx="78" fill="#2563EB"/>
+  <path fill="#2563EB" d="M215,320 L175,405 L295,320 Z"/>
+  <!-- Inner white fill -->
+  <rect x="160" y="135" width="230" height="175" rx="62" fill="#FFFFFF"/>
+  <path fill="#FFFFFF" d="M225,300 L200,365 L275,300 Z"/>
+  <!-- Seam cover -->
+  <rect x="210" y="285" width="80" height="35" fill="#FFFFFF"/>
+
+  <!-- Robot -->
+  <rect x="200" y="160" width="150" height="115" rx="28" fill="#2563EB"/>
+  <rect x="267" y="108" width="16" height="58" rx="8" fill="#2563EB"/>
+  <circle cx="275" cy="102" r="16" fill="#2563EB"/>
+  <rect x="220" y="190" width="44" height="24" rx="12" fill="#BFDBFE"/>
+  <rect x="286" y="190" width="44" height="24" rx="12" fill="#BFDBFE"/>
+  <!-- Smile as thick filled arc approximation -->
+  <path fill="#BFDBFE" d="
+    M248,245
+    C258,262 272,262 282,245
+    C275,255 265,255 258,245
+    Z"/>
+
+  <!-- ===== Code mark </> as filled chevrons ===== -->
+  <!-- < -->
+  <path fill="#2563EB" d="
+    M700,170
+    L620,255
+    L700,340
+    L735,340
+    L655,255
+    L735,170
+    Z"/>
+  <!-- / -->
+  <path fill="#2563EB" d="
+    M775,145
+    L730,365
+    L695,365
+    L740,145
+    Z"/>
+  <!-- > -->
+  <path fill="#2563EB" d="
+    M790,170
+    L870,255
+    L790,340
+    L755,340
+    L835,255
+    L755,170
+    Z"/>
+</svg>

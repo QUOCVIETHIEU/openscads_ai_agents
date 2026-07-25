@@ -119,8 +119,10 @@ std::string AIService::systemPromptForProfile(const std::string& profileName)
     // Local/small models: shorter, more rigid instructions.
     prompt =
       "You are Cad Agent for OpenSCAD. ONLY create 3D models with OpenSCAD code.\n\n"
-      "ALWAYS call tool `set_editor_code` with the FULL script. NEVER put code in chat.\n"
-      "Chat = 1–3 short sentences describing the model (same language as the user).\n\n"
+      "FIRST ACTION every turn: call tool `set_editor_code` with the FULL script.\n"
+      "NEVER put OpenSCAD in chat. NEVER reply with only OK / Done / Sure.\n"
+      "After the tool succeeds, write 2–4 sentences describing parts and sizes "
+      "(same language as the user).\n\n"
       "SYNTAX: modifiers wrap children (`color(\"red\") cube(10);`). End statements with `;`.\n"
       "Use variables for sizes. Use modules for parts. Use `$fn=32` on spheres/cylinders.\n\n"
       "QUALITY RULES (do not skip):\n"
@@ -332,94 +334,128 @@ void AIService::registerToolExecutor(ToolExecutor executor)
 void AIService::chatCompletionStream(std::vector<ChatMessage>& history, ChunkCallback on_chunk,
                                      ErrorCallback on_error, CompleteCallback on_complete)
 {
-  AIProfileConfig config;
-  std::string error_msg;
-  if (!loadActiveProfile(config, error_msg)) {
-    if (on_error) {
-      on_error(error_msg);
-    }
-    return;
-  }
-
-  std::vector<AIChatMessage> ai_history;
-  std::string sys_prompt = AIService::defaultSystemPrompt();
-
-  if (config.parameters.contains("system_prompt") && config.parameters["system_prompt"].is_string()) {
-    const auto custom = config.parameters["system_prompt"].get<std::string>();
-    if (!custom.empty()) {
-      sys_prompt = custom;
-    }
-  }
-  appendMandatoryChatReplyRule(sys_prompt);
-  appendMandatoryDrawingRule(sys_prompt);
-
-  bool already_has_system = false;
-  if (!history.empty() && history[0].role == "system") {
-    already_has_system = true;
-  }
-  if (!already_has_system) {
-    ai_history.push_back({"system", sys_prompt});
-  }
-
-  for (const auto& msg : history) {
-    AIChatMessage am;
-    am.role = msg.role;
-    am.content = msg.content;
-    am.tool_call_id = msg.tool_call_id;
-    am.images = msg.images;
-    if (!msg.tool_calls.empty()) {
-      try {
-        auto tcs_json = nlohmann::json::parse(msg.tool_calls);
-        if (tcs_json.is_array()) {
-          for (auto& tc_json : tcs_json) {
-            AIToolCall tc;
-            parseAIToolCall(tc_json, tc);
-            am.tool_calls.push_back(tc);
-          }
-        }
-      } catch (...) {
-      }
-    }
-    ai_history.push_back(am);
-  }
-
-  auto on_complete_wrapper = [this, config, &history, on_chunk, on_error, on_complete,
-                              sys_prompt](const std::vector<AIToolCall>& tool_calls) {
-    if (tool_calls.empty()) {
-      if (on_complete) {
-        on_complete();
+  auto run = std::make_shared<std::function<void(int, bool)>>();
+  *run = [this, &history, on_chunk, on_error, on_complete, run](int tool_round, bool include_tools) {
+    AIProfileConfig config;
+    std::string error_msg;
+    if (!loadActiveProfile(config, error_msg)) {
+      if (on_error) {
+        on_error(error_msg);
       }
       return;
     }
 
-    ChatMessage assistant_msg;
-    assistant_msg.role = "assistant";
-    assistant_msg.content = "";
-    nlohmann::json tcs_arr = nlohmann::json::array();
-    for (const auto& tc : tool_calls) {
-      tcs_arr.push_back(serializeAIToolCall(tc));
-    }
-    assistant_msg.tool_calls = tcs_arr.dump();
-    history.push_back(assistant_msg);
+    std::vector<AIChatMessage> ai_history;
+    std::string sys_prompt = AIService::defaultSystemPrompt();
 
-    for (const auto& tc : tool_calls) {
-      std::string result;
-      if (impl->tool_executor) {
-        result = impl->tool_executor(tc.name, tc.arguments);
-      } else {
-        result = "Error: No tool executor registered.";
+    if (config.parameters.contains("system_prompt") && config.parameters["system_prompt"].is_string()) {
+      const auto custom = config.parameters["system_prompt"].get<std::string>();
+      if (!custom.empty()) {
+        sys_prompt = custom;
       }
-      ChatMessage tool_msg;
-      tool_msg.role = "tool";
-      tool_msg.content = result;
-      tool_msg.tool_call_id = tc.id;
-      history.push_back(tool_msg);
+    }
+    appendMandatoryChatReplyRule(sys_prompt);
+    appendMandatoryDrawingRule(sys_prompt);
+
+    bool already_has_system = false;
+    if (!history.empty() && history[0].role == "system") {
+      already_has_system = true;
+    }
+    if (!already_has_system) {
+      ai_history.push_back({"system", sys_prompt});
     }
 
-    chatCompletionStream(history, on_chunk, on_error, on_complete);
+    for (const auto& msg : history) {
+      AIChatMessage am;
+      am.role = msg.role;
+      am.content = msg.content;
+      am.tool_call_id = msg.tool_call_id;
+      am.images = msg.images;
+      if (!msg.tool_calls.empty()) {
+        try {
+          auto tcs_json = nlohmann::json::parse(msg.tool_calls);
+          if (tcs_json.is_array()) {
+            for (auto& tc_json : tcs_json) {
+              AIToolCall tc;
+              parseAIToolCall(tc_json, tc);
+              am.tool_calls.push_back(tc);
+            }
+          }
+        } catch (...) {
+        }
+      }
+      ai_history.push_back(am);
+    }
+
+    auto on_complete_wrapper = [this, &history, on_chunk, on_error, on_complete, run,
+                                tool_round](const std::vector<AIToolCall>& tool_calls) {
+      if (tool_calls.empty()) {
+        if (on_complete) {
+          on_complete();
+        }
+        return;
+      }
+
+      constexpr int kMaxToolRounds = 6;
+      if (tool_round >= kMaxToolRounds) {
+        if (on_chunk) {
+          on_chunk("\n(Stopped after too many tool rounds.)");
+        }
+        if (on_complete) {
+          on_complete();
+        }
+        return;
+      }
+
+      ChatMessage assistant_msg;
+      assistant_msg.role = "assistant";
+      assistant_msg.content = "";
+      nlohmann::json tcs_arr = nlohmann::json::array();
+      for (const auto& tc : tool_calls) {
+        tcs_arr.push_back(serializeAIToolCall(tc));
+      }
+      assistant_msg.tool_calls = tcs_arr.dump();
+      history.push_back(assistant_msg);
+
+      bool wrote_code = false;
+      for (const auto& tc : tool_calls) {
+        std::string result;
+        if (impl->tool_executor) {
+          result = impl->tool_executor(tc.name, tc.arguments);
+        } else {
+          result = "Error: No tool executor registered.";
+        }
+        if (tc.name == "set_editor_code") {
+          wrote_code = true;
+        }
+        ChatMessage tool_msg;
+        tool_msg.role = "tool";
+        tool_msg.content = result;
+        tool_msg.tool_call_id = tc.id;
+        history.push_back(tool_msg);
+      }
+
+      // After applying code, skip a follow-up model turn. Local models (Ollama)
+      // often emit another broken tool JSON or "OK", which the UI then surfaces
+      // as a parse error even though the editor already has the script.
+      if (wrote_code) {
+        if (on_chunk) {
+          on_chunk("Applied the OpenSCAD model to the editor. Tell me what to change next.");
+        }
+        if (on_complete) {
+          on_complete();
+        }
+        return;
+      }
+
+      (*run)(tool_round + 1, true);
+    };
+
+    impl->ai_client->sendChatCompletionStream(config, ai_history, on_chunk, on_error,
+                                              on_complete_wrapper, include_tools);
   };
 
-  impl->ai_client->sendChatCompletionStream(config, ai_history, on_chunk, on_error, on_complete_wrapper);
+  (*run)(0, true);
 }
 
 void AIService::chatCompletion(const std::vector<ChatMessage>& history, ResponseCallback on_response,

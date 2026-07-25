@@ -50,12 +50,17 @@ public:
            tool_calls_.back().arguments.empty()) {
       tool_calls_.pop_back();
     }
+    // Ollama / some local models put tool invocations in content text, not tool_calls.
+    if (tool_calls_.empty() && !content_accum_.empty()) {
+      tool_calls_ = tryParseEmbeddedToolCalls(content_accum_);
+    }
   }
 
 private:
   std::string buffer_;
   TextCallback callback_;
   std::vector<AIToolCall> tool_calls_;
+  std::string content_accum_;
   nlohmann::json pending_extra_content_;
 
   void processLine(const std::string& line)
@@ -89,9 +94,11 @@ private:
         auto& choice = json["choices"][0];
         if (choice.contains("delta") && choice["delta"].is_object()) {
           auto& delta = choice["delta"];
-          if (delta.contains("content")) {
-            std::string text = delta["content"].get<std::string>();
+          if (delta.contains("content") && !delta["content"].is_null()) {
+            std::string text = delta["content"].is_string() ? delta["content"].get<std::string>()
+                                                           : delta["content"].dump();
             if (!text.empty()) {
+              content_accum_ += text;
               callback_(text);
               matched = true;
             }
@@ -165,9 +172,11 @@ private:
       // Ollama /api/chat format (content and thinking)
       if (!matched && json.contains("message") && json["message"].is_object()) {
         auto& message = json["message"];
-        if (message.contains("content")) {
-          std::string text = message["content"].get<std::string>();
+        if (message.contains("content") && !message["content"].is_null()) {
+          std::string text = message["content"].is_string() ? message["content"].get<std::string>()
+                                                           : message["content"].dump();
           if (!text.empty()) {
+            content_accum_ += text;
             callback_(text);
             matched = true;
           }
@@ -404,7 +413,8 @@ void AIClient::sendChatCompletion(const AIProfileConfig& config,
             if (choice.contains("message") && choice["message"].is_object()) {
               auto& msg = choice["message"];
               if (msg.contains("content") && !msg["content"].is_null()) {
-                content = msg["content"].get<std::string>();
+                content = msg["content"].is_string() ? msg["content"].get<std::string>()
+                                                     : msg["content"].dump();
               }
               if (msg.contains("tool_calls") && msg["tool_calls"].is_array()) {
                 for (auto& tc : msg["tool_calls"]) {
@@ -413,13 +423,35 @@ void AIClient::sendChatCompletion(const AIProfileConfig& config,
                   parsed_tool_calls.push_back(tool_call);
                 }
               }
+              if (parsed_tool_calls.empty() && !content.empty()) {
+                parsed_tool_calls = tryParseEmbeddedToolCalls(content);
+                if (!parsed_tool_calls.empty()) {
+                  // Keep history clean: tool turn should not also carry the fake JSON prose.
+                  content.clear();
+                }
+              }
             }
             on_response(content, parsed_tool_calls);
             return;
           }
           if (json.contains("message") && json["message"].is_object() &&
               json["message"].contains("content")) {
-            on_response(json["message"]["content"].get<std::string>(), {});
+            std::string content = json["message"]["content"].is_string()
+                                    ? json["message"]["content"].get<std::string>()
+                                    : json["message"]["content"].dump();
+            std::vector<AIToolCall> parsed_tool_calls;
+            if (json["message"].contains("tool_calls") && json["message"]["tool_calls"].is_array()) {
+              for (auto& tc : json["message"]["tool_calls"]) {
+                AIToolCall tool_call;
+                parseAIToolCall(tc, tool_call);
+                parsed_tool_calls.push_back(tool_call);
+              }
+            }
+            if (parsed_tool_calls.empty() && !content.empty()) {
+              parsed_tool_calls = tryParseEmbeddedToolCalls(content);
+              if (!parsed_tool_calls.empty()) content.clear();
+            }
+            on_response(content, parsed_tool_calls);
             return;
           }
           if (json.contains("response")) {
@@ -442,7 +474,7 @@ void AIClient::sendChatCompletion(const AIProfileConfig& config,
 void AIClient::sendChatCompletionStream(const AIProfileConfig& config,
                                         const std::vector<AIChatMessage>& history,
                                         ChunkCallback on_chunk, ErrorCallback on_error,
-                                        CompleteCallback on_complete)
+                                        CompleteCallback on_complete, bool include_tools)
 {
   const bool geminiCompat = isGeminiOpenAIEndpoint(config.endpoint);
 
@@ -450,7 +482,9 @@ void AIClient::sendChatCompletionStream(const AIProfileConfig& config,
   payload["model"] = config.model;
   payload["stream"] = true;
   payload["messages"] = buildChatMessages(history, geminiCompat);
-  payload["tools"] = getOpenSCADTools();
+  if (include_tools) {
+    payload["tools"] = getOpenSCADTools();
+  }
   mergeApiParameters(payload, config.parameters);
 
   std::string body = payload.dump();

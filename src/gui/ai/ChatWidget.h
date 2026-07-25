@@ -125,6 +125,7 @@ private:
   std::shared_ptr<std::string> activeResponseText;
   bool isRequestRunning = false;
   bool pendingPreviewRender = false;
+  bool appliedCodeThisTurn = false;
   bool panelCollapsed = false;
   int expandedDockWidth = 320;
 

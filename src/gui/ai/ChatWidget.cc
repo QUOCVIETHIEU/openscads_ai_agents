@@ -1,6 +1,7 @@
 #include "gui/ai/ChatWidget.h"
 #include "gui/qtgettext.h"
 #include "json/json.hpp"
+#include "core/AIClient.h"
 #include "core/AIFreeAgents.h"
 #include <future>
 #include <QScrollBar>
@@ -13,6 +14,7 @@
 #include <QPushButton>
 #include <QPlainTextEdit>
 #include <cmath>
+#include <cctype>
 #include <functional>
 #include <QPainter>
 #include <QPainterPath>
@@ -621,8 +623,11 @@ void ChatWidget::onSendPressed()
     [this, alive](const std::string& error_msg) {
       QMetaObject::invokeMethod(qApp, [this, alive, error_msg]() {
         if (!*alive || !isRequestRunning) return;
-        QString display_err = QString::fromStdString(error_msg);
-        if (display_err.contains(QStringLiteral("API limit reached"), Qt::CaseInsensitive) ||
+        QString display_err = QString::fromStdString(error_msg).trimmed();
+        if (display_err.isEmpty()) {
+          display_err = tr("Unknown error from the AI provider (empty response). "
+                           "Check that Ollama is running and the model is pulled.");
+        } else if (display_err.contains(QStringLiteral("API limit reached"), Qt::CaseInsensitive) ||
             display_err.contains(QStringLiteral("rate limited"), Qt::CaseInsensitive) ||
             display_err.contains(QStringLiteral("temporarily limited"), Qt::CaseInsensitive)) {
           display_err = tr("⚠️ API limited\n\n") + display_err;
@@ -656,6 +661,39 @@ void ChatWidget::onSendPressed()
 
         auto finishTurn = [this, alive]() {
           if (!*alive) return;
+          if (activeResponseText) {
+            auto trimCopy = [](std::string s) {
+              while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(0, 1);
+              while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+              return s;
+            };
+            std::string text = trimCopy(*activeResponseText);
+            auto isTrivial = [](const std::string& s) {
+              if (s.empty()) return true;
+              std::string lower;
+              lower.reserve(s.size());
+              for (unsigned char c : s) lower.push_back(static_cast<char>(std::tolower(c)));
+              return lower == "ok" || lower == "okay" || lower == "done" || lower == "sure" ||
+                     lower == "yes" || lower == "yep" || lower == "got it" || lower == "đã xong" ||
+                     lower == "xong" || lower == "ok." || lower == "done.";
+            };
+
+            if (appliedCodeThisTurn) {
+              if (text.empty() || isTrivial(text) || contentLooksLikeEmbeddedToolCall(text)) {
+                text = tr("Applied the OpenSCAD model to the editor. "
+                          "Check the 3D view / editor — say what to change next.")
+                         .toStdString();
+              }
+            } else if (contentLooksLikeEmbeddedToolCall(text) &&
+                       tryParseEmbeddedToolCalls(text).empty()) {
+              text = tr("Error: Model returned a tool call that could not be parsed. "
+                        "Try again, or simplify the request.")
+                       .toStdString();
+            }
+
+            *activeResponseText = text;
+          }
+
           if (activeResponseText && activeResponseText->empty()) {
             if (activeAIBubble) {
               scrollLayout->removeWidget(activeAIBubble);
@@ -670,6 +708,7 @@ void ChatWidget::onSendPressed()
             this->saveCurrentSession();
           }
           isRequestRunning = false;
+          appliedCodeThisTurn = false;
           activeAIBubble = nullptr;
           activeResponseText = nullptr;
           this->enableInput(true);
@@ -765,6 +804,7 @@ void ChatWidget::setUserEditButtonsEnabled(bool enabled)
 
 void ChatWidget::startNewResponseTurn()
 {
+  appliedCodeThisTurn = false;
   activeResponseText = std::make_shared<std::string>();
   activeAIBubble = addMessage(_("Thinking..."), false);
 }
@@ -1499,8 +1539,12 @@ void ChatWidget::logToolExecution(const std::string& name, const std::string& re
 std::string ChatWidget::executeTool(const std::string& name, const std::string& arguments_json)
 {
   // Drop any partial prose from the tool-call turn; only the final reply is shown in chat.
+  // (Ollama often streams fake tool JSON into content before we recover tool_calls.)
   if (activeResponseText) {
     activeResponseText->clear();
+  }
+  if (activeAIBubble) {
+    activeAIBubble->updateText(tr("Applying to editor…"));
   }
 
   MainWindow *mw = nullptr;
@@ -1522,8 +1566,20 @@ std::string ChatWidget::executeTool(const std::string& name, const std::string& 
     if (!args.contains("code")) {
       return "Error: Missing required argument 'code'.";
     }
-    std::string code = args["code"].get<std::string>();
+    std::string code;
+    if (args["code"].is_string()) {
+      code = args["code"].get<std::string>();
+    } else if (args["code"].is_object() && args["code"].contains("value") &&
+               args["code"]["value"].is_string()) {
+      code = args["code"]["value"].get<std::string>();
+    } else {
+      code = args["code"].dump();
+    }
     this->applyCodeChange(code);
+    appliedCodeThisTurn = true;
+    if (activeAIBubble) {
+      activeAIBubble->updateText(tr("Applied code to the editor…"));
+    }
     result_val =
       "Success: Code applied to the editor. Full render (F6) will run once when the reply finishes.";
   } else if (name == "trigger_preview") {
