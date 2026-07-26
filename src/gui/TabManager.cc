@@ -38,6 +38,7 @@
 #include "gui/MainWindow.h"
 #include "gui/Preferences.h"
 #include "gui/ScintillaEditor.h"
+#include "openscad_gui.h"
 #include "utils/printutils.h"
 
 namespace {
@@ -59,7 +60,7 @@ void applyVSCodeTabStyle(QTabWidget *tabWidget)
   // Match VS Code / Cursor tab strip height
   bar->setStyle(bar->style());
 
-  const bool dark = QApplication::palette().color(QPalette::Window).lightness() < 128;
+  const bool dark = isDarkMode();
 
   // Closely matches VS Code / Cursor workbench editor tabs (light & dark)
   QString style;
@@ -195,6 +196,11 @@ TabManager::TabManager(MainWindow *o, const QString& filename)
 
   // Disable the closing button for the first tabbar
   setTabsCloseButtonVisibility(0, false);
+}
+
+void TabManager::applyTheme()
+{
+  applyVSCodeTabStyle(tabWidget);
 }
 
 QTabBar::ButtonPosition TabManager::getClosingButtonPosition()

@@ -968,25 +968,70 @@ void MainWindow::compileEnded()
   emit compilationDone(this->rootFile.get());
 #endif
   if (aiRenderCompleteCallback) {
+    const AIRenderResult result = collectAIRenderResult();
+    aiRenderCapturing = false;
+    aiRenderMessages.clear();
     auto cb = std::move(aiRenderCompleteCallback);
     aiRenderCompleteCallback = nullptr;
     // Defer so unlock/status updates settle before the AI turn finishes its UI.
-    QTimer::singleShot(0, this, [cb = std::move(cb)]() { cb(); });
+    QTimer::singleShot(0, this, [cb = std::move(cb), result]() { cb(result); });
   }
 }
 
-void MainWindow::startAIFullRender(std::function<void()> onComplete)
+AIRenderResult MainWindow::collectAIRenderResult()
+{
+  AIRenderResult r;
+  r.errorCount = this->compileErrors;
+  r.warningCount = this->compileWarnings;
+
+  const auto geom = this->rootGeom;
+  if (geom && !geom->isEmpty()) {
+    r.empty = false;
+    r.success = (this->compileErrors == 0);
+    r.dimension = geom->getDimension();
+    r.facets = geom->numFacets();
+    const BoundingBox bb = geom->getBoundingBox();
+    r.hasBoundingBox = true;
+    r.bboxSize[0] = bb.sizes().x();
+    r.bboxSize[1] = bb.sizes().y();
+    r.bboxSize[2] = bb.sizes().z();
+  } else {
+    r.empty = true;
+    r.success = false;
+  }
+
+  std::string log;
+  for (const auto& m : this->aiRenderMessages) {
+    if (!log.empty()) log += "\n";
+    log += m;
+    if (log.size() > 2000) {
+      log.resize(2000);
+      log += "…";
+      break;
+    }
+  }
+  r.log = log;
+  return r;
+}
+
+void MainWindow::startAIFullRender(std::function<void(const AIRenderResult&)> onComplete)
 {
   cancelAIFullRenderCallback();
   aiRenderCompleteCallback = std::move(onComplete);
+  aiRenderCapturing = true;
+  aiRenderMessages.clear();
 
   auto startRender = [this]() {
     if (GuiLocker::isLocked()) {
       // Another compile is in progress; finish the AI turn without hanging.
       if (aiRenderCompleteCallback) {
+        AIRenderResult result;
+        result.log = "Render skipped: another compile was already in progress.";
+        aiRenderCapturing = false;
+        aiRenderMessages.clear();
         auto cb = std::move(aiRenderCompleteCallback);
         aiRenderCompleteCallback = nullptr;
-        QTimer::singleShot(0, this, [cb = std::move(cb)]() { cb(); });
+        QTimer::singleShot(0, this, [cb = std::move(cb), result]() { cb(result); });
       }
       return;
     }
@@ -1000,6 +1045,8 @@ void MainWindow::startAIFullRender(std::function<void()> onComplete)
 void MainWindow::cancelAIFullRenderCallback()
 {
   aiRenderCompleteCallback = nullptr;
+  aiRenderCapturing = false;
+  aiRenderMessages.clear();
 }
 
 #ifdef ENABLE_GUI_TESTS
@@ -3651,6 +3698,12 @@ void MainWindow::consoleOutput(const Message& msgObj)
   } else if (msgObj.group == message_group::Error) {
     ++this->compileErrors;
   }
+  // While an AI render runs, keep error/warning text so the agent can self-correct.
+  if (aiRenderCapturing && aiRenderMessages.size() < 20 &&
+      (msgObj.group == message_group::Error || msgObj.group == message_group::Warning ||
+       msgObj.group == message_group::UI_Error || msgObj.group == message_group::UI_Warning)) {
+    aiRenderMessages.push_back(msgObj.msg);
+  }
   // FIXME: scad parsing/evaluation should be done on separate thread so as not to block the gui.
   // Then processEvents should no longer be needed here.
   this->processEvents();
@@ -3812,6 +3865,13 @@ void MainWindow::setupPreferences()
           &MainWindow::openCSGSettingsChanged);
   connect(GlobalPreferences::inst(), &Preferences::colorSchemeChanged, this,
           &MainWindow::setColorScheme);
+  connect(GlobalPreferences::inst(), &Preferences::uiColorModeChanged, this, [this]() {
+    applyFlatWorkbenchChrome();
+    if (this->tabManager) this->tabManager->applyTheme();
+    if (this->aiDock && this->aiDock->chatWidget()) {
+      this->aiDock->chatWidget()->applyVSCodeChrome();
+    }
+  });
   connect(GlobalPreferences::inst(), &Preferences::toolbarExportChanged, this,
           &MainWindow::updateExportActions);
 
@@ -4221,7 +4281,7 @@ void MainWindow::applyFlatWorkbenchChrome()
 {
   // Match editor|preview divider to the thin flat AI chat separator (no 3D bevel).
   // Editor panel background matches AI chat (#f8f8f8 / #1e1e1e).
-  const bool dark = QApplication::palette().color(QPalette::Window).lightness() < 128;
+  const bool dark = isDarkMode();
   const QString sep = dark ? QStringLiteral("#2b2b2b") : QStringLiteral("#e5e5e5");
   const QString sepHover = dark ? QStringLiteral("#3c3c3c") : QStringLiteral("#c8c8c8");
   const QString panelBg = dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8");
@@ -4434,6 +4494,26 @@ void MainWindow::applyFlatWorkbenchChrome()
   }
   if (this->bottomPanelHeader) {
     this->bottomPanelHeader->applyTheme();
+  }
+
+  // Keep the built-in editor schemes in sync with the Appearance preference so
+  // the code paper matches the chrome (#1e1e1e). Leave custom schemes alone.
+  if (GlobalPreferences::inst()) {
+    const QString lightScheme = QStringLiteral("For Light Background");
+    const QString darkScheme = QStringLiteral("For Dark Background");
+    const QString current =
+      GlobalPreferences::inst()->getValue("editor/syntaxhighlight").toString();
+    QString desired;
+    if (dark && (current.isEmpty() || current == lightScheme)) {
+      desired = darkScheme;
+    } else if (!dark && current == darkScheme) {
+      desired = lightScheme;
+    }
+    if (!desired.isEmpty() && desired != current) {
+      QSettingsCached settings;
+      settings.setValue("editor/syntaxhighlight", desired);
+      emit GlobalPreferences::inst()->syntaxHighlightChanged(desired);
+    }
   }
 }
 
@@ -4924,8 +5004,13 @@ void MainWindow::openRemainingFiles(const QStringList& filenames)
 void MainWindow::changeEvent(QEvent *event)
 {
   if (event->type() == QEvent::ThemeChange) {
+    // Only follow OS theme when Appearance is System; Light/Dark stay fixed.
     setGlobalTheme();
     applyFlatWorkbenchChrome();
+    if (this->tabManager) this->tabManager->applyTheme();
+    if (this->aiDock && this->aiDock->chatWidget()) {
+      this->aiDock->chatWidget()->applyVSCodeChrome();
+    }
   }
   QMainWindow::changeEvent(event);
 }

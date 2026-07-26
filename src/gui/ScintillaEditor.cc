@@ -483,9 +483,12 @@ void ScintillaEditor::setColormap(const EditorColorScheme *colorScheme)
     auto font = this->lexer->font(this->lexer->defaultStyle());
     const QColor textColor(pt.get<std::string>("text").c_str());
     QColor paperColor(pt.get<std::string>("paper").c_str());
-    // Match AI chat workbench surface (avoid stark pure-white editor paper)
-    if (paperColor == QColor(Qt::white) || paperColor.name(QColor::HexRgb).toLower() == QLatin1String("#ffffff")) {
+    // Match AI chat / workbench surfaces (avoid stark pure-white or mismatched dark paper)
+    const QString paperHex = paperColor.name(QColor::HexRgb).toLower();
+    if (paperColor == QColor(Qt::white) || paperHex == QLatin1String("#ffffff")) {
       paperColor = QColor(QStringLiteral("#f8f8f8"));
+    } else if (paperHex == QLatin1String("#222222") || paperHex == QLatin1String("#272822")) {
+      paperColor = QColor(QStringLiteral("#1e1e1e"));
     }
 
 #if ENABLE_LEXERTL

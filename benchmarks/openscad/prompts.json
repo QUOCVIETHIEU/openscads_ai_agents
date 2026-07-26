@@ -1,0 +1,56 @@
+{
+  "description": "OpenSCAD text-to-CAD benchmark. Prompts adapted from earthtojake/text-to-cad (MIT) and rewritten for OpenSCAD's mm/CSG conventions. Scoring is two-layer: (1) does the produced .scad parse and render to non-empty geometry, and (2) do measurable facts (bounding box, dimension) match the spec within tolerance. Bounding boxes are axis-aligned sizes in mm.",
+  "bbox_tolerance_mm": 1.5,
+  "benchmarks": [
+    {
+      "id": "01-calibration-block",
+      "prompt": "Create a rectangular block 100 mm long in X, 60 mm wide in Y, and 20 mm tall in Z, centered on the XY origin with its bottom face at Z=0. Add four vertical 8 mm diameter through-holes at X=+/-35 mm and Y=+/-20 mm. Add a 2 mm chamfer on the top outer perimeter edges only (do not chamfer the holes).",
+      "expected": {
+        "dimension": 3,
+        "bbox": [100.0, 60.0, 20.0],
+        "min_facets": 12,
+        "notes": "Four through-holes; one solid; chamfer on top perimeter only."
+      }
+    },
+    {
+      "id": "02-circular-flange",
+      "prompt": "Create an 80 mm diameter, 10 mm thick circular flange with a 30 mm central through-bore. Add six 6 mm through-holes on a 60 mm diameter bolt circle. Round the outer circular edges with a small fillet.",
+      "expected": {
+        "dimension": 3,
+        "bbox": [80.0, 80.0, 10.0],
+        "min_facets": 60,
+        "notes": "Central 30 mm bore; six 6 mm holes on a 60 mm bolt circle."
+      }
+    },
+    {
+      "id": "03-l-bracket",
+      "prompt": "Create an L-bracket from a 80 x 60 x 6 mm base plate lying in XY and a 80 x 40 x 6 mm rear vertical plate rising in +Z along the back edge. Add two 5 mm vertical holes in the base and two 5 mm horizontal holes in the back plate, and two triangular gussets connecting the plates.",
+      "expected": {
+        "dimension": 3,
+        "bbox": [80.0, 60.0, 46.0],
+        "min_facets": 30,
+        "notes": "Base + back plate + two gussets; holes in two directions."
+      }
+    },
+    {
+      "id": "04-open-top-enclosure",
+      "prompt": "Create a hollow open-top rectangular enclosure with outer footprint 120 x 80 mm and total height 35 mm, with 3 mm walls and a 3 mm floor. Add four internal corner standoffs with centered 2.5 mm blind holes, and round the four outside vertical corners with a 2 mm radius.",
+      "expected": {
+        "dimension": 3,
+        "bbox": [120.0, 80.0, 35.0],
+        "min_facets": 60,
+        "notes": "Hollow shell (open top), four internal standoffs, rounded vertical corners."
+      }
+    },
+    {
+      "id": "05-stepped-shaft-keyway",
+      "prompt": "Create a 120 mm long shaft along X made of three coaxial stepped cylinders: 20 mm diameter for 40 mm, then 30 mm diameter for 40 mm, then 20 mm diameter for 40 mm. Add small chamfers on both ends and a shallow rectangular keyway on top of the middle 30 mm section.",
+      "expected": {
+        "dimension": 3,
+        "bbox": [120.0, 30.0, 30.0],
+        "min_facets": 60,
+        "notes": "Three stepped diameters along X; keyway on the middle section."
+      }
+    }
+  ]
+}

@@ -26,6 +26,7 @@
 
 #include "gui/Preferences.h"
 #include "gui/ai/AISettingsPanel.h"
+#include "openscad_gui.h"
 
 #include <QActionGroup>
 #include <QDialog>
@@ -297,7 +298,7 @@ void Preferences::init()
   this->actionTriggered(this->prefsAction3DView);
 
   // 3D View pane
-  this->defaultmap["3dview/colorscheme"] = "Cornfield";
+  this->defaultmap["3dview/colorscheme"] = "Daylight Gem";
 
   // Advanced pane
   const int absolute_max = (sizeof(void *) == 8) ? 1024 * 1024 : 2048;  // 1TB for 64bit or 2GB for 32bit
@@ -326,7 +327,10 @@ void Preferences::init()
   toolButtonLocalAppParameterAddFile->setMenu(menu);
 
   Settings::Settings::visit(SettingsReader());
+  // Re-apply after loading persisted appearance (startup called setGlobalTheme with defaults).
+  setGlobalTheme();
 
+  initComboBox(this->comboBoxUiColorMode, Settings::Settings::uiColorMode);
   initComboBox(this->comboBoxIndentUsing, Settings::Settings::indentStyle);
   initComboBox(this->comboBoxLineWrap, Settings::Settings::lineWrap);
   initComboBox(this->comboBoxLineWrapIndentationStyle, Settings::Settings::lineWrapIndentationStyle);
@@ -609,6 +613,13 @@ void Preferences::on_colorSchemeChooser_itemSelectionChanged()
   QSettingsCached settings;
   settings.setValue("3dview/colorscheme", scheme);
   emit colorSchemeChanged(scheme);
+}
+
+void Preferences::on_comboBoxUiColorMode_activated(int val)
+{
+  applyComboBox(comboBoxUiColorMode, val, Settings::Settings::uiColorMode);
+  setGlobalTheme();
+  emit uiColorModeChanged();
 }
 
 void Preferences::on_fontChooser_currentFontChanged(const QFont& font)
@@ -1616,6 +1627,7 @@ void Preferences::updateGUI()
 
   this->lineEditStepSize->setEnabled(getValue("editor/stepSize").toBool());
 
+  updateComboBox(this->comboBoxUiColorMode, Settings::Settings::uiColorMode);
   updateComboBox(this->comboBoxRenderBackend3D, Settings::Settings::renderBackend3D);
   updateComboBox(this->comboBoxLineWrap, Settings::Settings::lineWrap);
   updateComboBox(this->comboBoxLineWrapIndentationStyle, Settings::Settings::lineWrapIndentationStyle);

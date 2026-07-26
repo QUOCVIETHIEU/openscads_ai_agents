@@ -3,7 +3,9 @@
 #include "json/json.hpp"
 #include "core/AIClient.h"
 #include "core/AIFreeAgents.h"
+#include "openscad_gui.h"
 #include <future>
+#include <QEventLoop>
 #include <QScrollBar>
 #include <QFrame>
 #include <QLabel>
@@ -15,6 +17,7 @@
 #include <QPlainTextEdit>
 #include <cmath>
 #include <cctype>
+#include <sstream>
 #include <functional>
 #include <QPainter>
 #include <QPainterPath>
@@ -474,8 +477,7 @@ void MessageBubble::updateToolsPanel()
 
 bool MessageBubble::isDarkTheme() const
 {
-  QPalette pal = QApplication::palette();
-  return pal.color(QPalette::Window).lightness() < 128;
+  return isDarkMode();
 }
 
 // ChatWidget implementation
@@ -724,7 +726,7 @@ void ChatWidget::onSendPressed()
             break;
           }
           if (mw) {
-            mw->startAIFullRender([finishTurn]() { finishTurn(); });
+            mw->startAIFullRender([finishTurn](const AIRenderResult&) { finishTurn(); });
             return;
           }
         }
@@ -738,6 +740,10 @@ void ChatWidget::stopActiveRequest(bool keepPartialAssistant)
   if (!isRequestRunning) return;
   aiService->cancelPendingRequests();
   pendingPreviewRender = false;
+  // Break a synchronous render wait in executeTool(), if one is active.
+  if (activeRenderLoop) {
+    activeRenderLoop->quit();
+  }
   for (auto *win : scadApp->windowManager.getWindows()) {
     win->cancelAIFullRenderCallback();
     break;
@@ -1290,8 +1296,7 @@ void ChatWidget::setupCursorComposer()
 
 bool ChatWidget::isDarkTheme() const
 {
-  QPalette pal = QApplication::palette();
-  return pal.color(QPalette::Window).lightness() < 128;
+  return isDarkMode();
 }
 
 void ChatWidget::applyVSCodeChrome()
@@ -1505,7 +1510,7 @@ void ChatWidget::flushPendingPreview()
     break;
   }
   if (mw) {
-    mw->startAIFullRender([]() {});
+    mw->startAIFullRender([](const AIRenderResult&) {});
   }
 }
 
@@ -1520,7 +1525,7 @@ void ChatWidget::logToolExecution(const std::string& name, const std::string& re
                .arg(QString::fromStdString(result).count('\n'));
   } else if (name == "set_editor_code") {
     summary = tr("Applied code changes");
-    detail = tr("Tool: set_editor_code\nResult: Applied code to the active editor. Full render (F6) runs when the reply finishes.");
+    detail = QString::fromStdString("Tool: set_editor_code\nResult: " + result);
   } else if (name == "trigger_preview") {
     summary = tr("Queued full render");
     detail = QString::fromStdString("Tool: trigger_preview\nResult: " + result);
@@ -1534,6 +1539,92 @@ void ChatWidget::logToolExecution(const std::string& name, const std::string& re
   }
 
   scrollArea->verticalScrollBar()->setValue(scrollArea->verticalScrollBar()->maximum());
+}
+
+std::string ChatWidget::formatRenderResult(const AIRenderResult& rr) const
+{
+  std::ostringstream os;
+  auto appendFacts = [&]() {
+    if (rr.hasBoundingBox) {
+      os << " Bounding box (mm): " << rr.bboxSize[0] << " x " << rr.bboxSize[1] << " x "
+         << rr.bboxSize[2] << ".";
+    }
+    if (rr.dimension == 3) {
+      os << " Facets: " << rr.facets << ".";
+    }
+  };
+
+  if (rr.success) {
+    os << "Success: code applied and the F6 render completed with no errors.";
+    appendFacts();
+    if (rr.warningCount > 0) {
+      os << " Warnings: " << rr.warningCount << ".";
+      if (!rr.log.empty()) os << "\n" << rr.log;
+    }
+    os << "\nThe model is on screen. Do not call set_editor_code again unless the user asks "
+          "for a change.";
+    return os.str();
+  }
+
+  if (rr.empty && rr.errorCount == 0) {
+    os << "[render-error] Code applied but the render produced NO top-level geometry. Ensure "
+          "there is a top-level call to your assembly (or a root union), and that a difference() "
+          "did not subtract everything. Fix the code and call set_editor_code again.";
+    if (!rr.log.empty()) os << "\n" << rr.log;
+    return os.str();
+  }
+
+  os << "[render-error] Code applied but the F6 render reported " << rr.errorCount
+     << " error(s)";
+  if (rr.warningCount > 0) os << " and " << rr.warningCount << " warning(s)";
+  os << ". Fix the OpenSCAD code and call set_editor_code again with the corrected full script.";
+  if (!rr.log.empty()) os << "\n" << rr.log;
+  return os.str();
+}
+
+std::string ChatWidget::renderAppliedCodeAndDescribe()
+{
+  MainWindow *mw = nullptr;
+  for (auto *win : scadApp->windowManager.getWindows()) {
+    mw = win;
+    break;
+  }
+  if (!mw) {
+    // No window available: fall back to the deferred end-of-turn render (no feedback).
+    return "Success: Code applied to the editor. A full render (F6) will run when the reply "
+           "finishes.";
+  }
+
+  // We render synchronously here and wait, so avoid a second render at end of turn.
+  pendingPreviewRender = false;
+
+  AIRenderResult rr;
+  bool got = false;
+  QEventLoop loop;
+  activeRenderLoop = &loop;
+  mw->startAIFullRender([this, &rr, &got, &loop](const AIRenderResult& r) {
+    rr = r;
+    got = true;
+    if (activeRenderLoop == &loop) {
+      activeRenderLoop = nullptr;
+    }
+    loop.quit();
+  });
+  if (!got) {
+    loop.exec();
+  }
+  activeRenderLoop = nullptr;
+
+  if (!got) {
+    // Loop was quit by Stop before the render finished.
+    return "Cancelled: the render was interrupted by the user.";
+  }
+
+  if (activeAIBubble) {
+    activeAIBubble->updateText(rr.success ? tr("Applied code to the editor…")
+                                          : tr("Render reported problems…"));
+  }
+  return formatRenderResult(rr);
 }
 
 std::string ChatWidget::executeTool(const std::string& name, const std::string& arguments_json)
@@ -1578,10 +1669,9 @@ std::string ChatWidget::executeTool(const std::string& name, const std::string& 
     this->applyCodeChange(code);
     appliedCodeThisTurn = true;
     if (activeAIBubble) {
-      activeAIBubble->updateText(tr("Applied code to the editor…"));
+      activeAIBubble->updateText(tr("Rendering…"));
     }
-    result_val =
-      "Success: Code applied to the editor. Full render (F6) will run once when the reply finishes.";
+    result_val = renderAppliedCodeAndDescribe();
   } else if (name == "trigger_preview") {
     // Queue a single F6 render for the end of the turn instead of rendering mid-reply.
     pendingPreviewRender = true;

@@ -50,6 +50,7 @@ public slots:
   void featuresCheckBoxToggled(bool);
   void on_stackedWidget_currentChanged(int);
   void on_colorSchemeChooser_itemSelectionChanged();
+  void on_comboBoxUiColorMode_activated(int);
   void on_fontChooser_currentFontChanged(const QFont&);
   void on_fontSize_currentIndexChanged(int);
   void on_syntaxHighlight_currentTextChanged(const QString&);
@@ -167,6 +168,7 @@ signals:
   void consoleFontChanged(const QString& family, uint size) const;
   void customizerFontChanged(const QString& family, uint size) const;
   void colorSchemeChanged(const QString& scheme) const;
+  void uiColorModeChanged() const;
   void openCSGSettingsChanged() const;
   void syntaxHighlightChanged(const QString& s) const;
   void editorConfigChanged() const;

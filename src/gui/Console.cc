@@ -54,6 +54,7 @@
 #include "gui/MainWindow.h"
 #include "gui/Preferences.h"
 #include "gui/UIUtils.h"
+#include "openscad_gui.h"
 #include "utils/printutils.h"
 
 namespace {
@@ -185,7 +186,7 @@ void Console::addHtml(const QString& html)
 void Console::setConsoleFont(const QString& fontFamily, uint ptSize)
 {
   // Match MainWindow flat workbench panel colors (editor / AI chrome).
-  const bool dark = QApplication::palette().color(QPalette::Window).lightness() < 128;
+  const bool dark = isDarkMode();
   const QString bg = dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8");
   const QString fg = dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333");
   const QString sel = dark ? QStringLiteral("#264f78") : QStringLiteral("#add6ff");

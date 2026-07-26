@@ -28,6 +28,7 @@
 
 #include <QtCore/qstringliteral.h>
 
+#include <QCoreApplication>
 #include <QDialog>
 #include <QDir>
 #include <QFileInfo>
@@ -91,14 +92,7 @@ extern std::string arg_colorscheme;
 
 namespace {
 
-// Check if running with light or dark theme. This should really just be used
-// to switch the icon theme globally.
-//
-// For applying a color change, e.g. highlighting the background of an input
-// field, see:
-// UIUtils::blendForBackgroundColorStyleSheet(const QColor& input, const QColor& blend)
-
-bool isDarkMode()
+bool detectSystemDarkMode()
 {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
   const auto scheme = QGuiApplication::styleHints()->colorScheme();
@@ -108,7 +102,7 @@ bool isDarkMode()
   const auto& text = defaultPalette.color(QPalette::WindowText);
   const auto& window = defaultPalette.color(QPalette::Window);
   return text.lightness() > window.lightness();
-#endif  // QT_VERSION
+#endif
 }
 
 void configureOpenGLContext()
@@ -132,8 +126,29 @@ void configureOpenGLContext()
 
 }  // namespace
 
+bool isDarkMode()
+{
+  // Preference defaults to Light and is not auto-toggled by the OS.
+  const std::string mode = Settings::Settings::uiColorMode.value();
+  if (mode == "Dark") return true;
+  if (mode == "Light") return false;
+  return detectSystemDarkMode();
+}
+
 void setGlobalTheme()
 {
+  const std::string mode = Settings::Settings::uiColorMode.value();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+  // Force application color scheme so widgets/palettes match the preference
+  // instead of silently tracking macOS/Windows dark mode.
+  if (mode == "Light") {
+    QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Light);
+  } else if (mode == "Dark") {
+    QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Dark);
+  } else {
+    QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Unknown);
+  }
+#endif
   QIcon::setThemeName(isDarkMode() ? "chokusen-dark" : "chokusen");
 }
 

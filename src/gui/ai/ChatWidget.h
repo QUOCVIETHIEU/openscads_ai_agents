@@ -17,6 +17,7 @@ class QTimer;
 class QPushButton;
 class QDockWidget;
 class QFrame;
+class QEventLoop;
 
 class MessageBubble : public QWidget
 {
@@ -73,6 +74,7 @@ public:
   void startNewResponseTurn();
   void setCollapsed(bool collapsed);
   bool isCollapsed() const { return panelCollapsed; }
+  void applyVSCodeChrome();
 
 signals:
   void collapsedChanged(bool collapsed);
@@ -91,7 +93,6 @@ private:
   MessageBubble *addMessage(const QString& text, bool isUser, const QList<QImage>& images = {},
                             int historyIndex = -1);
   bool isDarkTheme() const;
-  void applyVSCodeChrome();
   void setupCursorComposer();
   void setupCursorHeader();
   void updateComposerActionButton();
@@ -101,6 +102,10 @@ private:
   void setUserEditButtonsEnabled(bool enabled);
   void stopActiveRequest(bool keepPartialAssistant);
   std::string executeTool(const std::string& name, const std::string& arguments_json);
+  // Apply code, run one synchronous F6 render, and return a model-readable summary of
+  // the render outcome (bounding box / facets on success, diagnostics on failure).
+  std::string renderAppliedCodeAndDescribe();
+  std::string formatRenderResult(const struct AIRenderResult& rr) const;
 
   void clearMessageWidgets();
   void rebuildMessageWidgets();
@@ -126,6 +131,8 @@ private:
   bool isRequestRunning = false;
   bool pendingPreviewRender = false;
   bool appliedCodeThisTurn = false;
+  // Set while executeTool() drives a synchronous F6 render; lets Stop break the wait.
+  QEventLoop *activeRenderLoop = nullptr;
   bool panelCollapsed = false;
   int expandedDockWidth = 320;
 

@@ -149,7 +149,9 @@ std::string AIService::systemPromptForProfile(const std::string& profileName)
 #include "json/json.hpp"
 #include <cmath>
 #include <fstream>
+#include <sstream>
 #include <cstdlib>
+#include <filesystem>
 
 static std::string getAISettingsPath()
 {
@@ -192,6 +194,68 @@ static void appendMandatoryDrawingRule(std::string& sys_prompt)
     "only — NEVER extrude them into a solid block. SECTION A-A/B-B hatched areas = solid material; "
     "empty areas inside sections = pockets/cavities/holes. Prefer `difference(outer, cavity)` for "
     "trays/shells; read wall/floor thickness from sections; apply via `set_editor_code`.";
+}
+
+// Load the bundled OpenSCAD CAD workflow skill (skills/openscad-cad/). Adapted from
+// earthtojake/text-to-cad (MIT). Result is cached after the first read; any failure
+// yields an empty string because the skill is an enhancement, not a hard requirement.
+static const std::string& loadCadSkill(bool compact)
+{
+  static std::string cachedFull;
+  static std::string cachedCompact;
+  static bool triedFull = false;
+  static bool triedCompact = false;
+
+  std::string& cache = compact ? cachedCompact : cachedFull;
+  bool& tried = compact ? triedCompact : triedFull;
+  if (tried) {
+    return cache;
+  }
+  tried = true;
+
+  try {
+    const std::filesystem::path dir = PlatformUtils::resourcePath("skills");
+    if (dir.empty()) {
+      return cache;
+    }
+    const std::filesystem::path file =
+      dir / "openscad-cad" / (compact ? "SKILL.compact.md" : "SKILL.md");
+    std::ifstream in(file);
+    if (!in.is_open()) {
+      return cache;
+    }
+    std::stringstream ss;
+    ss << in.rdbuf();
+    cache = ss.str();
+  } catch (...) {
+    // Leave the cache empty; proceed with the base prompt only.
+  }
+  return cache;
+}
+
+// Local/small models (Ollama-style) get the compact skill to conserve context.
+static bool profileIsLocalModel(const AIProfileConfig& config)
+{
+  const std::string ep = toLowerCopy(config.endpoint);
+  return ep.find("ollama") != std::string::npos || ep.find("localhost") != std::string::npos ||
+         ep.find("127.0.0.1") != std::string::npos || ep.find(":11434") != std::string::npos;
+}
+
+// Append the bundled CAD workflow so the model follows a consistent
+// plan → parameters → modules → apply → verify loop. Skipped when the prompt
+// already contains the skill (e.g. a user pasted it into a custom prompt).
+static void appendCadSkill(std::string& sys_prompt, bool compact)
+{
+  constexpr const char *kMarker = "# OpenSCAD CAD workflow";
+  if (sys_prompt.find(kMarker) != std::string::npos) {
+    return;
+  }
+  const std::string& skill = loadCadSkill(compact);
+  if (skill.empty()) {
+    return;
+  }
+  sys_prompt += "\n\n";
+  sys_prompt += skill;
 }
 
 // Old builds seeded restrictive defaults. Strip those exact values so requests are
@@ -356,6 +420,7 @@ void AIService::chatCompletionStream(std::vector<ChatMessage>& history, ChunkCal
     }
     appendMandatoryChatReplyRule(sys_prompt);
     appendMandatoryDrawingRule(sys_prompt);
+    appendCadSkill(sys_prompt, profileIsLocalModel(config));
 
     bool already_has_system = false;
     if (!history.empty() && history[0].role == "system") {
@@ -418,6 +483,7 @@ void AIService::chatCompletionStream(std::vector<ChatMessage>& history, ChunkCal
       history.push_back(assistant_msg);
 
       bool wrote_code = false;
+      bool render_error = false;
       for (const auto& tc : tool_calls) {
         std::string result;
         if (impl->tool_executor) {
@@ -427,6 +493,11 @@ void AIService::chatCompletionStream(std::vector<ChatMessage>& history, ChunkCal
         }
         if (tc.name == "set_editor_code") {
           wrote_code = true;
+          // The executor renders the applied code and marks a failed/empty render so we
+          // can grant the model a repair turn instead of ending on a broken model.
+          if (result.find("[render-error]") != std::string::npos) {
+            render_error = true;
+          }
         }
         ChatMessage tool_msg;
         tool_msg.role = "tool";
@@ -435,16 +506,35 @@ void AIService::chatCompletionStream(std::vector<ChatMessage>& history, ChunkCal
         history.push_back(tool_msg);
       }
 
-      // After applying code, skip a follow-up model turn. Local models (Ollama)
-      // often emit another broken tool JSON or "OK", which the UI then surfaces
-      // as a parse error even though the editor already has the script.
-      if (wrote_code) {
+      // Code applied and the render succeeded: end the turn. Local models (Ollama)
+      // often emit another broken tool JSON or "OK" if given a follow-up turn, which
+      // the UI then surfaces as a parse error even though the editor already has the
+      // correct script and a good render.
+      if (wrote_code && !render_error) {
         if (on_chunk) {
           on_chunk("Applied the OpenSCAD model to the editor. Tell me what to change next.");
         }
         if (on_complete) {
           on_complete();
         }
+        return;
+      }
+
+      // Code applied but the render failed / produced no geometry: let the model fix it,
+      // bounded by kMaxRepairRounds so a stuck model cannot loop forever.
+      if (wrote_code && render_error) {
+        constexpr int kMaxRepairRounds = 2;
+        if (tool_round >= kMaxRepairRounds) {
+          if (on_chunk) {
+            on_chunk("The render still reports problems after repair attempts. "
+                     "See the console error log for details.");
+          }
+          if (on_complete) {
+            on_complete();
+          }
+          return;
+        }
+        (*run)(tool_round + 1, true);
         return;
       }
 
@@ -480,6 +570,7 @@ void AIService::chatCompletion(const std::vector<ChatMessage>& history, Response
   }
   appendMandatoryChatReplyRule(sys_prompt);
   appendMandatoryDrawingRule(sys_prompt);
+  appendCadSkill(sys_prompt, profileIsLocalModel(config));
 
   bool already_has_system = false;
   if (!history.empty() && history[0].role == "system") {

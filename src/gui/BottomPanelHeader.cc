@@ -12,6 +12,7 @@
 #include <functional>
 
 #include "gui/qtgettext.h"
+#include "openscad_gui.h"
 
 namespace {
 
@@ -197,7 +198,7 @@ void BottomPanelHeader::rebuildIcons()
 
 void BottomPanelHeader::applyTheme()
 {
-  dark = QApplication::palette().color(QPalette::Window).lightness() < 128;
+  dark = isDarkMode();
   const QString bg = dark ? QStringLiteral("#252526") : QStringLiteral("#f3f3f3");
   const QString panel = dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8");
   const QString sep = dark ? QStringLiteral("#2b2b2b") : QStringLiteral("#e5e5e5");

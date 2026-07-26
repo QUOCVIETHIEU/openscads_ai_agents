@@ -385,6 +385,7 @@ class Settings
 public:
   static SettingsEntryBool showWarningsIn3dView;
   static SettingsEntryBool mouseCentricZoom;
+  static SettingsEntryEnum<std::string> uiColorMode;
   static SettingsEntryInt indentationWidth;
   static SettingsEntryInt tabWidth;
   static SettingsEntryEnum<std::string> lineWrap;

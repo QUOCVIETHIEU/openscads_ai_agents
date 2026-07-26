@@ -43,6 +43,7 @@ public:
   bool saveACopy(EditorInterface *edt);
   void open(const QString& filename);
   size_t count();
+  void applyTheme();
 
 public:
   static constexpr const int FIND_HIDDEN = 0;

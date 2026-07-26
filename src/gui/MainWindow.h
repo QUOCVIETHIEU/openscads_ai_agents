@@ -74,6 +74,20 @@ class AIDock;
 #include "utils/scope_guard.hpp"
 
 class UXTest;
+
+// Outcome of an AI-triggered F6 render, fed back to the agent so it can self-correct.
+struct AIRenderResult {
+  bool success = false;        // Geometry produced with no compile errors.
+  bool empty = false;          // Compiled but produced no top-level geometry.
+  int errorCount = 0;
+  int warningCount = 0;
+  unsigned int dimension = 0;  // 2 or 3 when geometry exists.
+  bool hasBoundingBox = false;
+  double bboxSize[3] = {0.0, 0.0, 0.0};
+  size_t facets = 0;
+  std::string log;             // Concatenated error/warning text captured during the render.
+};
+
 class MainWindow : public QMainWindow, public Ui::MainWindow, public InputEventHandler
 {
   Q_OBJECT
@@ -360,12 +374,14 @@ private slots:
 protected:
   bool eventFilter(QObject *obj, QEvent *event) override;
 
+public:
+  /*! Full F6 render for AI turns; invokes onComplete once when compile/render ends.
+   *  Not a slot: uses std::function<void(const AIRenderResult&)>, which moc mis-parses. */
+  void startAIFullRender(std::function<void(const AIRenderResult&)> onComplete);
+  void cancelAIFullRenderCallback();
 public slots:
   void actionRenderPreview();
   void on_designActionPreview_triggered();
-  /*! Full F6 render for AI turns; invokes onComplete once when compile/render ends. */
-  void startAIFullRender(std::function<void()> onComplete);
-  void cancelAIFullRenderCallback();
 private slots:
   void csgRender();
   void csgReloadRender();
@@ -500,9 +516,13 @@ private:
 
   QMenu *navigationMenu{nullptr};
   QSoundEffect *renderCompleteSoundEffect;
-  std::function<void()> aiRenderCompleteCallback;
+  std::function<void(const AIRenderResult&)> aiRenderCompleteCallback;
+  // Active only while an AI render runs, so error/warning text can be fed back to the agent.
+  bool aiRenderCapturing = false;
+  std::vector<std::string> aiRenderMessages;
   std::vector<std::unique_ptr<QTemporaryFile>> allTempFiles;
 
+  AIRenderResult collectAIRenderResult();
   void resetMeasurementsState(bool enable, const QString& tooltipMessage);
   QActionGroup *measurementGroup;
   QAction *activeMeasurement = nullptr;

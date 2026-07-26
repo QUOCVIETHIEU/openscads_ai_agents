@@ -2,6 +2,7 @@
 
 #include "gui/ai/AISettingsPanel.h"
 #include "gui/qtgettext.h"
+#include "openscad_gui.h"
 
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
@@ -38,7 +39,7 @@ AIApiKeyDialog::AIApiKeyDialog(QWidget *parent) : QDialog(parent)
   connect(buttons, &QDialogButtonBox::accepted, this, &AIApiKeyDialog::onSave);
   connect(buttons, &QDialogButtonBox::rejected, this, &AIApiKeyDialog::reject);
 
-  const bool dark = QApplication::palette().color(QPalette::Window).lightness() < 128;
+  const bool dark = isDarkMode();
   const QString bg = dark ? QStringLiteral("#1c1c1e") : QStringLiteral("#f2f2f4");
   const QString text = dark ? QStringLiteral("#f5f5f7") : QStringLiteral("#1d1d1f");
   const QString border = dark ? QStringLiteral("#3a3a3c") : QStringLiteral("#dcdce0");

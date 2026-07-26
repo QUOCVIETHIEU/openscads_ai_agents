@@ -1,12 +1,12 @@
 {
     "name" : "For Dark Background",
     "index" : 1100,
-    "paper" : "#222222",
-    "text" : "#e0e0e0",
+    "paper" : "#1e1e1e",
+    "text" : "#d4d4d4",
     "caret" : {
         "width" : 2,
-        "foreground" : "#ffff00",
-        "line-background" : "#303030"
+        "foreground" : "#aeafad",
+        "line-background" : "#2a2d2e"
     },
     "colors" : {
         "keyword1" : "#90ee90",
@@ -32,8 +32,8 @@
         "whitespace-foreground" : "#e0e0e0",
         "selection-foreground" : "#ffffff",
         "selection-background" : "#4a90d9",
-        "margin-background" : "#272822",
-        "margin-foreground" : "Gray",
+        "margin-background" : "#1e1e1e",
+        "margin-foreground" : "#858585",
         "matched-brace-background" : "#505050",
         "matched-brace-foreground" : "#ffffff",
         "unmatched-brace-background" : "#dc322f",
@@ -41,6 +41,6 @@
         "error-marker" : "#ff0000",
         "error-indicator" : "#60ff0000",
         "error-indicator-outline" : "#ff000000",
-        "edge" : "#ffffff"
+        "edge" : "#3c3c3c"
     }
 }

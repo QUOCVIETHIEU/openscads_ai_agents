@@ -149,6 +149,12 @@ std::istream& operator>>(std::istream& stream, LocalAppParameter& param)
 
 SettingsEntryBool Settings::showWarningsIn3dView("3dview", "showWarningsIn3dView", true);
 SettingsEntryBool Settings::mouseCentricZoom("3dview", "mouseCentricZoom", true);
+SettingsEntryEnum<std::string> Settings::uiColorMode(
+  "appearance", "uiColorMode",
+  {{"Light", "light", _("Light")},
+   {"Dark", "dark", _("Dark")},
+   {"System", "system", _("System")}},
+  "Light");
 SettingsEntryInt Settings::indentationWidth("editor", "indentationWidth", 1, 16, 4);
 SettingsEntryInt Settings::tabWidth("editor", "tabWidth", 1, 16, 4);
 SettingsEntryEnum<std::string> Settings::lineWrap("editor", "lineWrap",
