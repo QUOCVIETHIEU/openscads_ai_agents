@@ -129,17 +129,6 @@ QIcon makeCircularSendIcon(bool stopMode, bool dark)
   });
 }
 
-QIcon makeSidebarIcon(bool dark)
-{
-  return makeHiDpiIcon(16, [dark](QPainter& p, int s) {
-    QPen pen(iconFg(dark), 1.35, Qt::SolidLine, Qt::SquareCap, Qt::MiterJoin);
-    p.setPen(pen);
-    p.setBrush(Qt::NoBrush);
-    p.drawRoundedRect(QRectF(2.4, 2.8, s - 4.8, s - 5.6), 1.6, 1.6);
-    p.drawLine(QPointF(s * 0.66, 2.8), QPointF(s * 0.66, s - 2.8));
-  });
-}
-
 // Crisp status dot with a subtle highlight, so it reads as a small glossy LED
 // rather than a muddy blob. Green when the MCP bridge is live, gray when off.
 QIcon makeStatusDotIcon(const QColor& color)
@@ -1732,7 +1721,9 @@ void ChatWidget::setupCursorHeader()
   historyButton =
     makeHeaderIconButton("headerHistoryButton", QIcon::fromTheme(QStringLiteral("chokusen-history")),
                          _("Chat history"), headerWidget);
-  layoutButton = makeHeaderIconButton("headerLayoutButton", makeSidebarIcon(dark), _("Hide AI chat"),
+  layoutButton = makeHeaderIconButton("headerLayoutButton",
+                                      QIcon::fromTheme(QStringLiteral("ico_right_side")),
+                                      _("Hide AI chat"),
                                       headerWidget);
 
   headerLayout->addWidget(clearChatButton);
@@ -1916,7 +1907,7 @@ void ChatWidget::applyVSCodeChrome()
   }
   if (historyButton) historyButton->setIcon(QIcon::fromTheme(QStringLiteral("chokusen-history")));
   if (clearChatButton) clearChatButton->setIcon(QIcon::fromTheme(QStringLiteral("chokusen-recycle")));
-  if (layoutButton) layoutButton->setIcon(makeSidebarIcon(dark));
+  if (layoutButton) layoutButton->setIcon(QIcon::fromTheme(QStringLiteral("ico_right_side")));
   updateAgentButton();
   updateMcpBadge();
   updateComposerActionButton();

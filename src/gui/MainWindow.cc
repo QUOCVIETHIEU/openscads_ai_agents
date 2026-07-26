@@ -1515,6 +1515,7 @@ void MainWindow::showProjectView()
   this->editorAreaStack->setCurrentIndex(0);
   setEditorAreaContentVisible(true);
   refreshEditorActivityBar();
+  refreshWindowTitle();
 }
 
 void MainWindow::showEditorView()
@@ -1523,6 +1524,7 @@ void MainWindow::showEditorView()
   this->editorAreaStack->setCurrentIndex(1);
   setEditorAreaContentVisible(true);
   refreshEditorActivityBar();
+  refreshWindowTitle();
 }
 
 void MainWindow::setEditorAreaContentVisible(bool visible)
@@ -1567,6 +1569,20 @@ void MainWindow::refreshEditorActivityBar()
   const int idx = showing ? this->editorAreaStack->currentIndex() : -1;
   if (this->projectViewTabBtn) this->projectViewTabBtn->setChecked(idx == 0);
   if (this->editorViewTabBtn) this->editorViewTabBtn->setChecked(idx == 1);
+}
+
+void MainWindow::refreshWindowTitle()
+{
+  // Explorer activity: show the project name. Editor activity: show the file.
+  if (this->editorAreaStack && this->editorAreaStack->currentIndex() == 0 &&
+      ProjectManager::instance().hasProject()) {
+    const QString project = ProjectManager::instance().projectName();
+    if (!project.isEmpty()) {
+      setWindowTitle(project);
+      return;
+    }
+  }
+  setWindowTitle(getCurrentFileName());
 }
 
 void MainWindow::onProjectActivityClicked()
@@ -3893,7 +3909,7 @@ void MainWindow::onTabManagerEditorChanged(EditorInterface *newEditor)
   editActionUndo->setEnabled(newEditor->canUndo());
 
   const QString name = getCurrentFileName();
-  setWindowTitle(name);
+  refreshWindowTitle();
 
   consoleDock->setNameSuffix(name);
   errorLogDock->setNameSuffix(name);
@@ -4774,7 +4790,7 @@ void MainWindow::setupZoomControls()
   this->zoomPercentEdit->setObjectName(QStringLiteral("zoomPercentEdit"));
   this->zoomPercentEdit->setAlignment(Qt::AlignCenter);
   this->zoomPercentEdit->setFixedWidth(48);
-  this->zoomPercentEdit->setFixedHeight(18);
+  this->zoomPercentEdit->setFixedHeight(20);
   this->zoomPercentEdit->setFrame(false);
   this->zoomPercentEdit->setToolTip(_("Type a zoom percent and press Enter"));
   this->zoomPercentEdit->setValidator(new QRegularExpressionValidator(
@@ -4806,11 +4822,11 @@ void MainWindow::setupZoomControls()
   zoomFitBtn->setFixedWidth(24);
   zoomFitBtn->setToolButtonStyle(Qt::ToolButtonIconOnly);
 
-  layout->addWidget(zoomOutBtn);
-  layout->addWidget(this->zoomPercentEdit);
-  layout->addWidget(zoomInBtn);
+  layout->addWidget(zoomOutBtn, 0, Qt::AlignVCenter);
+  layout->addWidget(this->zoomPercentEdit, 0, Qt::AlignVCenter);
+  layout->addWidget(zoomInBtn, 0, Qt::AlignVCenter);
   layout->addWidget(sep, 0, Qt::AlignVCenter);
-  layout->addWidget(zoomFitBtn);
+  layout->addWidget(zoomFitBtn, 0, Qt::AlignVCenter);
 
   this->viewerToolBar->insertWidget(this->viewActionResetView, this->zoomControlGroup);
 

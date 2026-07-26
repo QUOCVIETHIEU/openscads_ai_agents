@@ -19,7 +19,8 @@ void ProjectFileIconProvider::setDarkMode(bool dark)
 
 QIcon ProjectFileIconProvider::icon(IconType type) const
 {
-  if (type == Folder) return themeIcon("explorer-folder");
+  // Cursor-style: directories are identified by their expand chevron alone.
+  if (type == Folder) return {};
   if (type == File) return themeIcon("explorer-file");
   return QFileIconProvider::icon(type);
 }
@@ -27,7 +28,7 @@ QIcon ProjectFileIconProvider::icon(IconType type) const
 QIcon ProjectFileIconProvider::icon(const QFileInfo& info) const
 {
   if (info.isDir()) {
-    return themeIcon("explorer-folder");
+    return {};
   }
 
   const QString suffix = info.suffix().toLower();

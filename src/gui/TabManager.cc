@@ -29,6 +29,7 @@
 #include <QTextStream>
 #include <QStyle>
 #include <QStyleFactory>
+#include <QToolButton>
 #include <QWidget>
 #include <cassert>
 #include <cstddef>
@@ -99,7 +100,7 @@ void applyVSCodeTabStyle(QTabWidget *tabWidget)
         max-width: 200px;
         min-height: 32px;
         max-height: 32px;
-        padding: 0px 10px 0px 8px;
+        padding: 0px 0px 0px px;
         margin: 0px;
         font-size: 12px;
       }
@@ -111,13 +112,26 @@ void applyVSCodeTabStyle(QTabWidget *tabWidget)
         background: #2a2d2e;
         color: #cccccc;
       }
-      QTabBar::close-button {
-        subcontrol-position: right;
-        margin: 0px 8px 0px 4px;
+      QTabBar QToolButton {
+        background: transparent;
+        border: none;
+        margin: 0px;
+        padding: 0px;
       }
-      QTabBar::close-button:hover {
-        background: #3c3c3c;
+      QTabBar QToolButton:hover {
+        background: rgba(255,255,255,0.10);
         border-radius: 3px;
+      }
+      QTabBar::scroller {
+        width: 20px;
+      }
+      QTabBar QToolButton::left-arrow {
+        image: url(:/icons/chokusen-dark/svg/chokusen-prev.svg);
+        width: 12px; height: 12px;
+      }
+      QTabBar QToolButton::right-arrow {
+        image: url(:/icons/chokusen-dark/svg/chokusen-next.svg);
+        width: 12px; height: 12px;
       }
     )");
   } else {
@@ -149,7 +163,7 @@ void applyVSCodeTabStyle(QTabWidget *tabWidget)
         max-width: 200px;
         min-height: 32px;
         max-height: 32px;
-        padding: 0px 10px 0px 8px;
+        padding: 0px 4px 0px 8px;
         margin: 0px;
         font-size: 12px;
       }
@@ -161,18 +175,84 @@ void applyVSCodeTabStyle(QTabWidget *tabWidget)
         background: #e8e8e8;
         color: #333333;
       }
-      QTabBar::close-button {
-        subcontrol-position: right;
-        margin: 0px 8px 0px 4px;
+      QTabBar QToolButton {
+        background: transparent;
+        border: none;
+        margin: 0px;
+        padding: 0px;
       }
-      QTabBar::close-button:hover {
-        background: #e0e0e0;
+      QTabBar QToolButton:hover {
+        background: rgba(0,0,0,0.07);
         border-radius: 3px;
+      }
+      QTabBar::scroller {
+        width: 20px;
+      }
+      QTabBar QToolButton::left-arrow {
+        image: url(:/icons/chokusen/svg/chokusen-prev.svg);
+        width: 12px; height: 12px;
+      }
+      QTabBar QToolButton::right-arrow {
+        image: url(:/icons/chokusen/svg/chokusen-next.svg);
+        width: 12px; height: 12px;
       }
     )");
   }
 
   tabWidget->setStyleSheet(style);
+}
+
+QString tabCloseButtonStyle(bool dark)
+{
+  const QString hover =
+    dark ? QStringLiteral("rgba(255,255,255,0.12)") : QStringLiteral("rgba(0,0,0,0.08)");
+  // Lock a square hit-target: QTabBar otherwise stretches the button to full
+  // tab height, which squashes the "x" into a tall pill on hover.
+  return QStringLiteral(
+           "QToolButton#tabCloseButton {"
+           "  border: none;"
+           "  background: transparent;"
+           "  padding: 0px;"
+           "  margin: 0px 8px 0px 4px;"
+           "  min-width: 20px;"
+           "  max-width: 20px;"
+           "  min-height: 20px;"
+           "  max-height: 20px;"
+           "}"
+           "QToolButton#tabCloseButton:hover {"
+           "  border: none;"
+           "  background: %1;"
+           "  border-radius: 4px;"
+           "  min-width: 20px;"
+           "  max-width: 20px;"
+           "  min-height: 20px;"
+           "  max-height: 20px;"
+           "}"
+           "QToolButton#tabCloseButton:pressed {"
+           "  border: none;"
+           "  background: %1;"
+           "  min-width: 20px;"
+           "  max-width: 20px;"
+           "  min-height: 20px;"
+           "  max-height: 20px;"
+           "}")
+    .arg(hover);
+}
+
+QToolButton *makeTabCloseButton(QWidget *parent)
+{
+  auto *btn = new QToolButton(parent);
+  btn->setObjectName(QStringLiteral("tabCloseButton"));
+  btn->setAutoRaise(true);
+  btn->setCursor(Qt::PointingHandCursor);
+  btn->setFocusPolicy(Qt::NoFocus);
+  btn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+  btn->setFixedSize(20, 20);
+  btn->setIconSize(QSize(16, 16));
+  btn->setIcon(QIcon::fromTheme(QStringLiteral("ico_close")));
+  btn->setStyleSheet(tabCloseButtonStyle(isDarkMode()));
+  btn->setToolTip(QObject::tr("Close"));
+  return btn;
 }
 
 }  // namespace
@@ -182,7 +262,8 @@ TabManager::TabManager(MainWindow *o, const QString& filename)
   parent = o;
 
   tabWidget = new QTabWidget();
-  tabWidget->setTabsClosable(true);
+  // Custom flat "x" buttons — avoid Fusion's default close glyph (breaks on hover).
+  tabWidget->setTabsClosable(false);
   tabWidget->setMovable(true);
   tabWidget->setContextMenuPolicy(Qt::CustomContextMenu);
   applyVSCodeTabStyle(tabWidget);
@@ -207,13 +288,53 @@ TabManager::TabManager(MainWindow *o, const QString& filename)
 void TabManager::applyTheme()
 {
   applyVSCodeTabStyle(tabWidget);
+  refreshTabCloseButtons();
+}
+
+void TabManager::installTabCloseButton(int index)
+{
+  if (!tabWidget || index < 0 || index >= tabWidget->count()) return;
+
+  QTabBar *bar = tabWidget->tabBar();
+  auto *btn = makeTabCloseButton(bar);
+  connect(btn, &QToolButton::clicked, this, [this, btn]() {
+    QTabBar *b = tabWidget->tabBar();
+    for (int i = 0; i < b->count(); ++i) {
+      if (b->tabButton(i, QTabBar::RightSide) == btn) {
+        closeTabRequested(i);
+        return;
+      }
+    }
+  });
+  bar->setTabButton(index, QTabBar::RightSide, btn);
+}
+
+void TabManager::refreshTabCloseButtons()
+{
+  if (!tabWidget) return;
+  QTabBar *bar = tabWidget->tabBar();
+  const QString style = tabCloseButtonStyle(isDarkMode());
+  const QIcon icon = QIcon::fromTheme(QStringLiteral("ico_close"));
+  for (int i = 0; i < bar->count(); ++i) {
+    auto *btn = qobject_cast<QToolButton *>(bar->tabButton(i, QTabBar::RightSide));
+    if (!btn || btn->objectName() != QLatin1String("tabCloseButton")) {
+      installTabCloseButton(i);
+      btn = qobject_cast<QToolButton *>(bar->tabButton(i, QTabBar::RightSide));
+    }
+    if (!btn) continue;
+    btn->setIcon(icon);
+    btn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    btn->setIconSize(QSize(16, 16));
+    btn->setFixedSize(20, 20);
+    btn->setStyleSheet(style);
+  }
+  // Keep only the active tab's close button visible when multiple tabs exist.
+  tabSwitched(tabWidget->currentIndex());
 }
 
 QTabBar::ButtonPosition TabManager::getClosingButtonPosition()
 {
-  auto bar = tabWidget->tabBar();
-  return (QTabBar::ButtonPosition)bar->style()->styleHint(QStyle::SH_TabBar_CloseButtonPosition, nullptr,
-                                                          bar);
+  return QTabBar::RightSide;
 }
 
 void TabManager::setTabsCloseButtonVisibility(int indice, bool isVisible)
@@ -380,6 +501,7 @@ void TabManager::createTab(const QString& filename)
   auto [fname, fpath] = getEditorTabNameWithModifier(editor);
   const int tabIndex = tabWidget->addTab(editor, fname);
   tabWidget->setTabToolTip(tabIndex, fpath);
+  installTabCloseButton(tabIndex);
   if (tabWidget->currentWidget() != editor) {
     tabWidget->setCurrentWidget(editor);
   }

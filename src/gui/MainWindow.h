@@ -411,6 +411,7 @@ public:
   void onProjectActivityClicked();
   void onEditorActivityClicked();
   void refreshEditorActivityBar();
+  void refreshWindowTitle();
 public slots:
   void actionRenderPreview();
   void on_designActionPreview_triggered();

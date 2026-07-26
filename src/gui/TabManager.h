@@ -71,6 +71,8 @@ private:
   void saveError(const QIODevice& file, const std::string& msg, const QString& filepath);
   void applyAction(QObject *object, const std::function<void(int, EditorInterface *)>& func);
   void setTabsCloseButtonVisibility(int tabIndice, bool isVisible);
+  void installTabCloseButton(int index);
+  void refreshTabCloseButtons();
 
   QTabBar::ButtonPosition getClosingButtonPosition();
   void zoomIn();

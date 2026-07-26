@@ -23,6 +23,150 @@
 #include <QDesktopServices>
 #include <QUrl>
 
+namespace {
+
+// Cursor-style: every folder keeps an expand chevron, even when empty.
+// QFileSystemModel only reports hasChildren after it finds entries, so empty
+// dirs lose their branch arrow otherwise.
+class ProjectFileSystemModel : public QFileSystemModel
+{
+public:
+  using QFileSystemModel::QFileSystemModel;
+
+  bool hasChildren(const QModelIndex& parent = QModelIndex()) const override
+  {
+    if (parent.isValid() && isDir(parent)) return true;
+    return QFileSystemModel::hasChildren(parent);
+  }
+};
+
+QString inputDialogStyle(bool dark)
+{
+  if (dark) {
+    return QStringLiteral(R"(
+      QInputDialog, QMessageBox {
+        background: #252526;
+      }
+      QLabel {
+        color: #cccccc;
+        font-size: 13px;
+        padding: 2px 0 8px 0;
+      }
+      QLineEdit {
+        min-height: 36px;
+        padding: 8px 12px;
+        font-size: 13px;
+        color: #cccccc;
+        background: #1e1e1e;
+        border: 1px solid #3c3c3c;
+        border-radius: 6px;
+        selection-background-color: #094771;
+      }
+      QLineEdit:focus {
+        border: 1px solid #0078d4;
+      }
+      QPushButton {
+        min-width: 96px;
+        min-height: 32px;
+        padding: 6px 18px;
+        font-size: 13px;
+        border-radius: 6px;
+        border: 1px solid #3c3c3c;
+        background: #2d2d2d;
+        color: #cccccc;
+      }
+      QPushButton:hover {
+        background: #3a3a3a;
+      }
+      QPushButton:default {
+        background: #0e639c;
+        border: 1px solid #0e639c;
+        color: #ffffff;
+      }
+      QPushButton:default:hover {
+        background: #1177bb;
+      }
+    )");
+  }
+  return QStringLiteral(R"(
+    QInputDialog, QMessageBox {
+      background: #f8f8f8;
+    }
+    QLabel {
+      color: #333333;
+      font-size: 13px;
+      padding: 2px 0 8px 0;
+    }
+    QLineEdit {
+      min-height: 36px;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: #333333;
+      background: #ffffff;
+      border: 1px solid #d0d0d0;
+      border-radius: 6px;
+      selection-background-color: #cce0ff;
+    }
+    QLineEdit:focus {
+      border: 1px solid #0078d4;
+    }
+    QPushButton {
+      min-width: 96px;
+      min-height: 32px;
+      padding: 6px 18px;
+      font-size: 13px;
+      border-radius: 6px;
+      border: 1px solid #d0d0d0;
+      background: #f3f3f3;
+      color: #333333;
+    }
+    QPushButton:hover {
+      background: #e8e8e8;
+    }
+    QPushButton:default {
+      background: #0078d4;
+      border: 1px solid #0078d4;
+      color: #ffffff;
+    }
+    QPushButton:default:hover {
+      background: #106ebe;
+    }
+  )");
+}
+
+QString promptText(QWidget *parent, const QString& title, const QString& label, const QString& text,
+                   bool *ok)
+{
+  QInputDialog dlg(parent);
+  dlg.setWindowTitle(title);
+  dlg.setLabelText(label);
+  dlg.setTextValue(text);
+  dlg.setInputMode(QInputDialog::TextInput);
+  dlg.setOkButtonText(_("OK"));
+  dlg.setCancelButtonText(_("Cancel"));
+  dlg.setStyleSheet(inputDialogStyle(isDarkMode()));
+  dlg.setMinimumSize(480, 200);
+  dlg.resize(520, 220);
+  const int result = dlg.exec();
+  if (ok) *ok = (result == QDialog::Accepted);
+  return dlg.textValue();
+}
+
+int askYesNo(QWidget *parent, const QString& title, const QString& text)
+{
+  QMessageBox box(parent);
+  box.setWindowTitle(title);
+  box.setText(text);
+  box.setIcon(QMessageBox::Question);
+  box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+  box.setDefaultButton(QMessageBox::No);
+  box.setStyleSheet(inputDialogStyle(isDarkMode()));
+  box.setMinimumWidth(420);
+  return box.exec();
+}
+
+}  // namespace
+
 ProjectExplorer::ProjectExplorer(QWidget *parent) : QWidget(parent)
 {
   setObjectName(QStringLiteral("projectExplorer"));
@@ -96,7 +240,7 @@ ProjectExplorer::ProjectExplorer(QWidget *parent) : QWidget(parent)
   treeLayout->setContentsMargins(0, 0, 0, 0);
   treeLayout->setSpacing(0);
 
-  model_ = new QFileSystemModel(this);
+  model_ = new ProjectFileSystemModel(this);
   model_->setFilter(QDir::AllDirs | QDir::Files | QDir::NoDotAndDotDot);
   model_->setReadOnly(false);
   iconProvider_ = new ProjectFileIconProvider();
@@ -201,6 +345,7 @@ void ProjectExplorer::refreshTheme()
       color: %4;
       font-size: 12px;
       outline: 0;
+      show-decoration-selected: 0;
     }
     QTreeView#projectExplorerTree::item {
       min-height: 22px;
@@ -212,6 +357,12 @@ void ProjectExplorer::refreshTheme()
       border-image: none;
       image: none;
     }
+    QTreeView#projectExplorerTree::branch:hover,
+    QTreeView#projectExplorerTree::branch:selected,
+    QTreeView#projectExplorerTree::branch:selected:active,
+    QTreeView#projectExplorerTree::branch:selected:hover {
+      background: transparent;
+    }
     QTreeView#projectExplorerTree::branch:has-children:!has-siblings:closed,
     QTreeView#projectExplorerTree::branch:closed:has-children:has-siblings {
       border-image: none;
@@ -221,6 +372,16 @@ void ProjectExplorer::refreshTheme()
     QTreeView#projectExplorerTree::branch:open:has-children:has-siblings {
       border-image: none;
       image: url(%9);
+    }
+    QTreeView#projectExplorerTree::branch:has-children:!has-siblings:closed:selected,
+    QTreeView#projectExplorerTree::branch:closed:has-children:has-siblings:selected,
+    QTreeView#projectExplorerTree::branch:open:has-children:!has-siblings:selected,
+    QTreeView#projectExplorerTree::branch:open:has-children:has-siblings:selected,
+    QTreeView#projectExplorerTree::branch:has-children:!has-siblings:closed:hover,
+    QTreeView#projectExplorerTree::branch:closed:has-children:has-siblings:hover,
+    QTreeView#projectExplorerTree::branch:open:has-children:!has-siblings:hover,
+    QTreeView#projectExplorerTree::branch:open:has-children:has-siblings:hover {
+      background: transparent;
     }
     QTreeView#projectExplorerTree::item:hover {
       background: %6;
@@ -342,8 +503,8 @@ void ProjectExplorer::onCustomContextMenu(const QPoint& pos)
 
   if (chosen == newFile) {
     bool ok = false;
-    const QString name = QInputDialog::getText(this, _("New File"), _("File name:"), QLineEdit::Normal,
-                                               QStringLiteral("untitled.scad"), &ok);
+    const QString name =
+      promptText(this, _("New File"), _("File name:"), QStringLiteral("untitled.scad"), &ok);
     if (!ok || name.trimmed().isEmpty()) return;
     if (name.contains(QLatin1String(".."))) return;
     const QString path = QDir(targetDir).filePath(name.trimmed());
@@ -354,8 +515,8 @@ void ProjectExplorer::onCustomContextMenu(const QPoint& pos)
     }
   } else if (chosen == newFolder) {
     bool ok = false;
-    const QString name = QInputDialog::getText(this, _("New Folder"), _("Folder name:"),
-                                               QLineEdit::Normal, QStringLiteral("folder"), &ok);
+    const QString name =
+      promptText(this, _("New Folder"), _("Folder name:"), QStringLiteral("folder"), &ok);
     if (!ok || name.trimmed().isEmpty()) return;
     if (name.contains(QLatin1String(".."))) return;
     QDir(targetDir).mkpath(name.trimmed());
@@ -363,17 +524,14 @@ void ProjectExplorer::onCustomContextMenu(const QPoint& pos)
     const QString path = absolutePathForIndex(index);
     QFileInfo info(path);
     bool ok = false;
-    const QString name =
-      QInputDialog::getText(this, _("Rename"), _("New name:"), QLineEdit::Normal, info.fileName(), &ok);
+    const QString name = promptText(this, _("Rename"), _("New name:"), info.fileName(), &ok);
     if (!ok || name.trimmed().isEmpty() || name.contains(QLatin1String(".."))) return;
     const QString dest = info.dir().filePath(name.trimmed());
     QFile::rename(path, dest);
   } else if (chosen == remove && index.isValid()) {
     const QString path = absolutePathForIndex(index);
-    const auto answer = QMessageBox::question(
-      this, _("Delete"),
-      tr("Delete \"%1\"?").arg(QFileInfo(path).fileName()),
-      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    const auto answer = askYesNo(this, _("Delete"),
+                                 tr("Delete \"%1\"?").arg(QFileInfo(path).fileName()));
     if (answer != QMessageBox::Yes) return;
     QFileInfo info(path);
     if (info.isDir()) {
