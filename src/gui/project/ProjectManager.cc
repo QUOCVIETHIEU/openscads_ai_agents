@@ -326,11 +326,14 @@ QString ProjectManager::ensureTempScad()
 QString ProjectManager::aiTargetFile()
 {
   if (rootPath_.isEmpty()) return {};
+  // Prefer the last known project .scad when it exists. Callers that need an
+  // editor buffer (set_editor_code) create an unsaved Untitled tab instead of
+  // writing design/temp.scad when nothing is open in the UI.
   if (!activeFile_.isEmpty() && activeFile_.endsWith(QStringLiteral(".scad"), Qt::CaseInsensitive) &&
       QFileInfo::exists(activeFile_)) {
     return activeFile_;
   }
-  return ensureTempScad();
+  return {};
 }
 
 QString ProjectManager::rulesText() const
@@ -511,11 +514,15 @@ std::string ProjectManager::buildContextPromptBlock() const
   os << "Project name: " << projectName_.toStdString() << "\n";
   os << "Project root: " << rootPath_.toStdString() << "\n";
   const QString target = const_cast<ProjectManager *>(this)->aiTargetFile();
-  os << "AI target file (write OpenSCAD here via set_editor_code): "
-     << QDir(rootPath_).relativeFilePath(target).toStdString() << "\n";
+  if (!target.isEmpty()) {
+    os << "Preferred project .scad (if already open in the editor): "
+       << QDir(rootPath_).relativeFilePath(target).toStdString() << "\n";
+  }
+  os << "If no editor tab is open, set_editor_code creates an unsaved Untitled tab; "
+        "the user picks a path when closing (default folder: design/).\n";
   if (!activeFile_.isEmpty()) {
-    os << "Active editor file: " << QDir(rootPath_).relativeFilePath(activeFile_).toStdString()
-       << "\n";
+    os << "Last active project file: "
+       << QDir(rootPath_).relativeFilePath(activeFile_).toStdString() << "\n";
   }
   os << "Design files:\n";
   for (const QString& f : listDesignFiles()) {

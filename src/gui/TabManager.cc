@@ -44,6 +44,7 @@
 #include "gui/MainWindow.h"
 #include "gui/Preferences.h"
 #include "gui/ScintillaEditor.h"
+#include "gui/project/ProjectManager.h"
 #include "openscad_gui.h"
 #include "utils/printutils.h"
 
@@ -1047,9 +1048,15 @@ bool TabManager::saveAs(EditorInterface *edt)
 {
   assert(edt != nullptr);
 
-  const auto dir = edt->filepath.isEmpty() ? _("Untitled.scad") : edt->filepath;
+  QString suggested = edt->filepath;
+  if (suggested.isEmpty()) {
+    // Untitled / AI temp tabs default into the project design/ folder.
+    const QString design = ProjectManager::instance().designDir();
+    suggested = design.isEmpty() ? QString(_("Untitled.scad"))
+                                 : QDir(design).filePath(QStringLiteral("Untitled.scad"));
+  }
   auto filename =
-    QFileDialog::getSaveFileName(parent, _("Save File"), dir, _("OpenSCAD Designs (*.scad)"));
+    QFileDialog::getSaveFileName(parent, _("Save File"), suggested, _("OpenSCAD Designs (*.scad)"));
   if (filename.isEmpty()) {
     return false;
   }
@@ -1082,6 +1089,10 @@ bool TabManager::saveAs(EditorInterface *edt, const QString& filepath)
     auto [fname, fpath] = getEditorTabNameWithModifier(edt);
     setEditorTabName(fname, fpath, edt);
     parent->setWindowTitle(fname);
+    auto& pm = ProjectManager::instance();
+    if (pm.hasProject()) {
+      pm.setActiveFile(filepath);
+    }
   }
   return saveOk;
 }

@@ -1255,15 +1255,7 @@ void ChatWidget::onHistoryPressed()
           menu.close();
           QString err;
           if (!ProjectManager::instance().openProject(root, &err)) return;
-          MainWindow *mw = nullptr;
-          for (auto *win : scadApp->windowManager.getWindows()) {
-            mw = win;
-            break;
-          }
-          if (mw && mw->tabManager) {
-            const QString target = ProjectManager::instance().aiTargetFile();
-            if (!target.isEmpty()) mw->tabManager->open(target);
-          }
+          // Land on Project explorer with no auto-opened editor tab.
           onProjectChanged();
         });
         rowLayout->addWidget(open, 1);
@@ -2013,44 +2005,34 @@ void ChatWidget::applyCodeChange(const std::string& code)
     mw = win;
     break;
   }
-  if (!mw) return;
+  if (!mw || !mw->tabManager) return;
 
   // Always surface the editor when AI writes code (any prompt / set_editor_code).
   mw->showEditorView();
 
-  auto& pm = ProjectManager::instance();
-  if (pm.hasProject()) {
-    const QString target = pm.aiTargetFile();
-    if (!target.isEmpty()) {
-      // Open / focus the AI target file, then write.
-      if (mw->tabManager) mw->tabManager->open(target);
-      if (mw->activeEditor) {
-        mw->activeEditor->setText(QString::fromStdString(code));
-        // Persist to disk so the project file stays in sync.
-        QFile f(target);
-        if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-          f.write(code.c_str(), static_cast<qint64>(code.size()));
-        }
-        pm.setActiveFile(target);
-      }
-      // Re-assert after open/tab switch in case another handler flipped the stack.
-      mw->showEditorView();
-      QTimer::singleShot(0, mw, [mw]() {
-        if (mw) mw->showEditorView();
-      });
-      pendingPreviewRender = true;
-      return;
+  // No open tab → create an unsaved Untitled buffer (not written to disk until Save).
+  if (!mw->tabManager->hasOpenEditors()) {
+    mw->tabManager->actionNew();
+  }
+
+  if (!mw->activeEditor) return;
+
+  // Overwrite the open editor buffer in-place (Cmd/Ctrl+Z undoes). Do not write
+  // disk here — that would trip auto-reload and show a "reload modified file?" dialog.
+  mw->activeEditor->setText(QString::fromStdString(code));
+
+  if (!mw->activeEditor->filepath.isEmpty()) {
+    auto& pm = ProjectManager::instance();
+    if (pm.hasProject()) {
+      pm.setActiveFile(mw->activeEditor->filepath);
     }
   }
 
-  if (mw->activeEditor) {
-    mw->activeEditor->setText(QString::fromStdString(code));
-    mw->showEditorView();
-    QTimer::singleShot(0, mw, [mw]() {
-      if (mw) mw->showEditorView();
-    });
-    pendingPreviewRender = true;
-  }
+  mw->showEditorView();
+  QTimer::singleShot(0, mw, [mw]() {
+    if (mw) mw->showEditorView();
+  });
+  pendingPreviewRender = true;
 }
 
 void ChatWidget::flushPendingPreview()
@@ -2464,12 +2446,20 @@ std::string ChatWidget::executeTool(const std::string& name, const std::string& 
     appliedCodeThisTurn = true;
     if (activeAIBubble) activeAIBubble->updateText(tr("Previewing…"));
     result_val = previewAppliedCodeAndDescribe();
-    if (ProjectManager::instance().hasProject()) {
-      const QString target = ProjectManager::instance().aiTargetFile();
-      if (!target.isEmpty()) {
-        result_val = "Applied to: " +
-                     QDir(ProjectManager::instance().rootPath()).relativeFilePath(target).toStdString() +
-                     "\n" + result_val;
+    if (mw && mw->activeEditor) {
+      if (mw->activeEditor->filepath.isEmpty()) {
+        result_val = "Applied to: Untitled (unsaved — user will choose path on close; "
+                     "default folder: design/)\n" +
+                     result_val;
+      } else if (ProjectManager::instance().hasProject()) {
+        result_val =
+          "Applied to: " +
+          QDir(ProjectManager::instance().rootPath())
+            .relativeFilePath(mw->activeEditor->filepath)
+            .toStdString() +
+          "\n" + result_val;
+      } else {
+        result_val = "Applied to: " + mw->activeEditor->filepath.toStdString() + "\n" + result_val;
       }
     }
   } else if (name == "list_project_files") {

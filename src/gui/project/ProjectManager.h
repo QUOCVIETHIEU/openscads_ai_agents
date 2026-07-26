@@ -42,7 +42,8 @@ public:
   QString activeFilePath() const { return activeFile_; }
   void setActiveFile(const QString& absolutePath);
 
-  /*! File AI should write to: active .scad if set, else design/temp.scad. */
+  /*! Preferred project .scad for AI context (active file if it exists). Empty if none —
+   *  the UI creates an unsaved Untitled tab instead of writing design/temp.scad. */
   QString aiTargetFile();
 
   QString designDir() const;
