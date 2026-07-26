@@ -1,6 +1,6 @@
 ---
 name: openscad-cad
-description: Workflow for turning natural-language or drawing requests into complete, renderable, parametric OpenSCAD models. Adapted for OpenSCAD's own kernel (CSG + F6 render), not STEP/build123d.
+description: Workflow for turning natural-language or drawing requests into complete, renderable, parametric OpenSCAD models. Adapted for OpenSCAD's own kernel (CSG F5 preview + F6 mesh), not STEP/build123d.
 ---
 
 # OpenSCAD CAD workflow
@@ -8,7 +8,7 @@ description: Workflow for turning natural-language or drawing requests into comp
 Provenance: this workflow is adapted from the CAD skill in
 [earthtojake/text-to-cad](https://github.com/earthtojake/text-to-cad) (MIT License,
 Copyright (c) 2026 earthtojake). The original targets STEP/build123d; this version is
-rewritten for OpenSCAD's language and F6 render pipeline. No STEP, build123d, CAD Viewer,
+rewritten for OpenSCAD's language and F5/F6 pipeline. No STEP, build123d, CAD Viewer,
 or Python tooling is used here.
 
 ## Purpose
@@ -50,10 +50,14 @@ detailed part or a drawing-driven part needs the full list.
 4. Write named parameters for every controlling dimension at the top of the file.
 5. Write one small `module` per part, then assemble with `translate` / `rotate` /
    `union()` / `difference()` / `hull()`.
-6. Apply the FULL script with `set_editor_code`.
-7. After the render result comes back, verify it against the brief's validation targets.
-   If the render failed or the geometry is empty/wrong, repair and re-apply (see below).
-8. In chat, write 2-5 short sentences: what you built and the key dimensions. No code.
+6. Apply the FULL script with `set_editor_code` (this runs a fast F5 CSG preview).
+7. After the preview result comes back, verify with `get_model_info` and
+   `get_preview_image` against the brief's validation targets. If the preview failed or
+   the geometry is empty/wrong, repair and re-apply (see below). Keep iterating with
+   F5 only — do not call `trigger_render` mid-iteration.
+8. When the design looks right, call `trigger_render` (alias `trigger_build`) ONCE for
+   the final F6 mesh build.
+9. In chat, write 2-5 short sentences: what you built and the key dimensions. No code.
 
 ## Internal brief (do not ask the user to fill this in)
 
@@ -92,8 +96,9 @@ conflict instead of silently picking one.
 
 ## Common failure modes and repairs
 
-Use the render result that comes back after `set_editor_code`. When it reports an error,
-change the smallest responsible section and re-apply. Prefer at most two repair attempts.
+Use the preview result that comes back after `set_editor_code` / `trigger_preview`. When
+it reports an error, change the smallest responsible section and re-apply. Prefer at most
+two repair attempts. Only after a good preview should you call `trigger_render`.
 
 - Parser / syntax error (WARNING/ERROR in the result): missing `;`, a `;` after a
   `module`/block, a modifier assigned to a variable, or unbalanced braces. Fix exactly

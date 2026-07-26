@@ -12,6 +12,7 @@
 
 #include <functional>
 #include <memory>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -25,6 +26,7 @@ GLView::GLView()
   aspectratio = 1;
   showedges = false;
   showaxes = false;
+  showfloor = false;
   showcrosshairs = false;
   showscale = false;
   colorscheme = &ColorMap::instance().defaultColorScheme();
@@ -192,6 +194,8 @@ void GLView::paintGL()
   // The crosshair should be fixed at the center of the viewport...
   if (showcrosshairs) GLView::showCrosshairs(crosshaircol);
   glTranslated(cam.object_trans.x(), cam.object_trans.y(), cam.object_trans.z());
+  // Ground plane at Z=0 helps read model orientation / height.
+  if (showfloor) GLView::showFloor(axescolor);
   // ...the axis lines need to follow the object translation.
   if (showaxes) GLView::showAxes(axescolor);
   // mark the scale along the axis lines
@@ -446,6 +450,64 @@ void GLView::showAxes(const Color4f& col)
   glVertex4d(0, 0, 0, 1);
   glVertex4d(0, 0, -1, 0);
   glEnd();
+  glPopAttrib();
+}
+
+void GLView::showFloor(const Color4f& col)
+{
+  // XY ground plane at Z=0. Size tracks camera distance so it stays useful
+  // across zoom levels; grid spacing uses the same log-step as scale markers.
+  const double l = std::max(1.0, cam.zoomValue());
+  const int log_l = static_cast<int>(floor(log10(l)));
+  const double l_adjusted = pow(10, log_l);
+  const double tick = std::max(l_adjusted / 10.0, 1e-6);
+  // Cover a bit more than the current view frustum so edges don't pop in/out.
+  const double half = tick * std::max(8.0, ceil((l * 1.35) / tick));
+
+  glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_POLYGON_BIT | GL_LINE_BIT);
+  glDisable(GL_LIGHTING);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glEnable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);  // transparent fill shouldn't punch holes in the model
+
+  // Soft filled plane — tint from axes color so it tracks the theme.
+  glColor4f(col.r(), col.g(), col.b(), 0.10f);
+  glBegin(GL_QUADS);
+  glVertex3d(-half, -half, 0);
+  glVertex3d(half, -half, 0);
+  glVertex3d(half, half, 0);
+  glVertex3d(-half, half, 0);
+  glEnd();
+
+  // Grid lines
+  glLineWidth(this->getDPI());
+  glBegin(GL_LINES);
+  const int steps = static_cast<int>(std::lround((half * 2.0) / tick));
+  for (int i = -steps / 2; i <= steps / 2; ++i) {
+    const double p = i * tick;
+    const bool major = (i % 10 == 0);
+    const float a = major ? 0.38f : 0.16f;
+    glColor4f(col.r(), col.g(), col.b(), a);
+    // lines parallel to Y (constant X)
+    glVertex3d(p, -half, 0);
+    glVertex3d(p, half, 0);
+    // lines parallel to X (constant Y)
+    glVertex3d(-half, p, 0);
+    glVertex3d(half, p, 0);
+  }
+  glEnd();
+
+  // Outer border a touch stronger for a clear ground silhouette
+  glColor4f(col.r(), col.g(), col.b(), 0.45f);
+  glBegin(GL_LINE_LOOP);
+  glVertex3d(-half, -half, 0);
+  glVertex3d(half, -half, 0);
+  glVertex3d(half, half, 0);
+  glVertex3d(-half, half, 0);
+  glEnd();
+
+  glDepthMask(GL_TRUE);
   glPopAttrib();
 }
 

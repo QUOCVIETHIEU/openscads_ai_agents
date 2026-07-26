@@ -22,7 +22,7 @@ std::string resolveMcpServerScriptPath();
 /*!
  * Run Cursor Agent CLI asynchronously with OpenSCAD MCP tools.
  * Uses agent mode + project `.cursor/mcp.json` so the model can call
- * set_editor_code / get_editor_code / trigger_preview via the localhost bridge.
+ * set_editor_code / get_editor_code / trigger_preview / trigger_render via the localhost bridge.
  * Falls back to fence/JSON extraction only if MCP did not apply code.
  */
 void runCursorAgentChat(const AIProfileConfig& config, const std::vector<AIChatMessage>& history,

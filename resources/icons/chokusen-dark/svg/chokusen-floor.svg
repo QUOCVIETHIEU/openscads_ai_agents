@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="100mm" height="100mm" viewBox="-8 -108 116 116" xmlns="http://www.w3.org/2000/svg">
+<title>Show Floor</title>
+<!-- Perspective floor plane with light grid -->
+<path fill="none" stroke="white" stroke-width="3" stroke-linejoin="round"
+  d="M 12,-48 L 50,-28 L 88,-48 L 50,-68 Z"/>
+<path fill="none" stroke="white" stroke-width="1.6" stroke-linejoin="round" opacity="0.55"
+  d="M 31,-58 L 50,-48 L 69,-58
+     M 31,-38 L 50,-48 L 69,-38
+     M 22,-53 L 50,-38 L 78,-53
+     M 22,-43 L 50,-58 L 78,-43"/>
+</svg>

@@ -176,6 +176,7 @@
          <addaction name="viewActionOrthogonal"/>
          <addaction name="separator"/>
          <addaction name="viewActionShowAxes"/>
+         <addaction name="viewActionShowFloor"/>
          <addaction name="viewActionShowScaleProportional"/>
          <addaction name="viewActionShowEdges"/>
         </widget>
@@ -348,6 +349,7 @@
     <addaction name="separator"/>
     <addaction name="viewActionShowEdges"/>
     <addaction name="viewActionShowAxes"/>
+    <addaction name="viewActionShowFloor"/>
     <addaction name="viewActionShowScaleProportional"/>
     <addaction name="viewActionShowCrosshairs"/>
     <addaction name="separator"/>
@@ -1178,6 +1180,23 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+2</string>
+   </property>
+  </action>
+  <action name="viewActionShowFloor">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="icon">
+    <iconset theme="chokusen-floor"/>
+   </property>
+   <property name="text">
+    <string>Show &amp;Floor</string>
+   </property>
+   <property name="toolTip">
+    <string>Show XY ground plane in the 3D preview</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Shift+F</string>
    </property>
   </action>
   <action name="viewActionShowCrosshairs">

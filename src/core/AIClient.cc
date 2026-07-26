@@ -302,8 +302,9 @@ nlohmann::json getOpenSCADTools()
     nlohmann::json sec_fn = nlohmann::json::object();
     sec_fn["name"] = "set_editor_code";
     sec_fn["description"] =
-      "Apply complete OpenSCAD source code to the editor and run a full F6 render. Always pass the "
-      "FULL file. After success, call get_model_info and get_preview_image to verify quality.";
+      "Apply complete OpenSCAD source code to the editor and run a fast F5 CSG preview. Always "
+      "pass the FULL file. While iterating, verify with get_model_info and get_preview_image. "
+      "Do NOT call trigger_render until the design looks correct.";
     nlohmann::json sec_params = nlohmann::json::object();
     sec_params["type"] = "object";
     nlohmann::json sec_props = nlohmann::json::object();
@@ -320,10 +321,16 @@ nlohmann::json getOpenSCADTools()
 
   addSimple("get_editor_code", "Retrieve the current source code present in the editor to inspect it.");
   addSimple("trigger_preview",
-            "Run a full F6 render of the current editor contents and return render status.");
+            "Run a fast F5 CSG preview of the current editor contents (no full mesh). "
+            "Use while iterating / checking.");
+  addSimple("trigger_render",
+            "Run a full F6 mesh render (slow). Call ONCE when the design is final. "
+            "Alias: trigger_build.");
+  addSimple("trigger_build",
+            "Alias for trigger_render: full F6 mesh render. Use only when the design is final.");
   addSimple("get_model_info",
-            "Return last/current render facts: success, empty, errors, warnings, bounding box (mm), "
-            "facets, and log. Use after set_editor_code.");
+            "Return last/current preview or render facts: success, empty, errors, warnings, "
+            "bounding box (mm), facets (after F6), and log. Use after set_editor_code / preview.");
 
   {
     nlohmann::json tool = nlohmann::json::object();

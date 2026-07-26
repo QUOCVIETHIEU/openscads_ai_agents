@@ -531,6 +531,9 @@ void MainWindow::loadViewSettings()
   if (settings.value("view/showAxes", true).toBool()) {
     viewActionShowAxes->setChecked(true);
   }
+  if (settings.value("view/showFloor", true).toBool()) {
+    viewActionShowFloor->setChecked(true);
+  }
   if (settings.value("view/showCrosshairs").toBool()) {
     viewActionShowCrosshairs->setChecked(true);
   }
@@ -983,6 +986,7 @@ AIRenderResult MainWindow::collectAIRenderResult()
   AIRenderResult r;
   r.errorCount = this->compileErrors;
   r.warningCount = this->compileWarnings;
+  r.isPreview = this->isPreview;
 
   const auto geom = this->rootGeom;
   if (geom && !geom->isEmpty()) {
@@ -995,6 +999,21 @@ AIRenderResult MainWindow::collectAIRenderResult()
     r.bboxSize[0] = bb.sizes().x();
     r.bboxSize[1] = bb.sizes().y();
     r.bboxSize[2] = bb.sizes().z();
+  } else if (this->qglview && this->qglview->getRenderer()) {
+    // Preview (F5) has CSG products but usually no rootGeom mesh yet.
+    const BoundingBox bb = this->qglview->getRenderer()->getBoundingBox();
+    if (!bb.isEmpty()) {
+      r.empty = false;
+      r.success = (this->compileErrors == 0);
+      r.dimension = 3;
+      r.hasBoundingBox = true;
+      r.bboxSize[0] = bb.sizes().x();
+      r.bboxSize[1] = bb.sizes().y();
+      r.bboxSize[2] = bb.sizes().z();
+    } else {
+      r.empty = true;
+      r.success = false;
+    }
   } else {
     r.empty = true;
     r.success = false;
@@ -1012,6 +1031,34 @@ AIRenderResult MainWindow::collectAIRenderResult()
   }
   r.log = log;
   return r;
+}
+
+void MainWindow::startAIPreview(std::function<void(const AIRenderResult&)> onComplete)
+{
+  cancelAIFullRenderCallback();
+  aiRenderCompleteCallback = std::move(onComplete);
+  aiRenderCapturing = true;
+  aiRenderMessages.clear();
+
+  auto startPreview = [this]() {
+    if (GuiLocker::isLocked()) {
+      if (aiRenderCompleteCallback) {
+        AIRenderResult result;
+        result.isPreview = true;
+        result.log = "Preview skipped: another compile was already in progress.";
+        aiRenderCapturing = false;
+        aiRenderMessages.clear();
+        auto cb = std::move(aiRenderCompleteCallback);
+        aiRenderCompleteCallback = nullptr;
+        QTimer::singleShot(0, this, [cb = std::move(cb), result]() { cb(result); });
+      }
+      return;
+    }
+    // F5 — fast CSG preview for iteration / visual checks.
+    on_designActionPreview_triggered();
+  };
+
+  QTimer::singleShot(0, this, startPreview);
 }
 
 void MainWindow::startAIFullRender(std::function<void(const AIRenderResult&)> onComplete)
@@ -3088,6 +3135,14 @@ void MainWindow::on_viewActionShowAxes_toggled(bool checked)
   settings.setValue("view/showAxes", checked);
   this->viewActionShowScaleProportional->setEnabled(checked);
   this->qglview->setShowAxes(checked);
+  this->qglview->update();
+}
+
+void MainWindow::on_viewActionShowFloor_toggled(bool checked)
+{
+  QSettingsCached settings;
+  settings.setValue("view/showFloor", checked);
+  this->qglview->setShowFloor(checked);
   this->qglview->update();
 }
 

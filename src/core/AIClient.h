@@ -276,7 +276,8 @@ inline bool parseOneEmbeddedToolCall(const nlohmann::json& node, AIToolCall& out
 
   if (name.empty()) return false;
   // Only accept known OpenSCAD tools (avoid treating arbitrary JSON as a tool).
-  if (name != "set_editor_code" && name != "get_editor_code" && name != "trigger_preview") {
+  if (name != "set_editor_code" && name != "get_editor_code" && name != "trigger_preview" &&
+      name != "trigger_render" && name != "trigger_build") {
     return false;
   }
 

@@ -104,8 +104,9 @@ private:
   void setUserEditButtonsEnabled(bool enabled);
   void stopActiveRequest(bool keepPartialAssistant);
   std::string executeTool(const std::string& name, const std::string& arguments_json);
-  // Apply code, run one synchronous F6 render, and return a model-readable summary of
-  // the render outcome (bounding box / facets on success, diagnostics on failure).
+  // Apply code, run one synchronous F5 preview, and return a model-readable summary.
+  std::string previewAppliedCodeAndDescribe();
+  // Full F6 mesh render (exportable geometry). Use only when the design is final.
   std::string renderAppliedCodeAndDescribe();
   std::string formatRenderResult(const struct AIRenderResult& rr) const;
   std::string formatModelInfo() const;
@@ -147,7 +148,7 @@ private:
   double lastRenderBBox[3] = {0, 0, 0};
   size_t lastRenderFacets = 0;
   std::string lastRenderLog;
-  // Set while executeTool() drives a synchronous F6 render; lets Stop break the wait.
+  // Set while executeTool() drives a synchronous F5/F6 compile; lets Stop break the wait.
   QEventLoop *activeRenderLoop = nullptr;
   bool panelCollapsed = false;
   int expandedDockWidth = 320;

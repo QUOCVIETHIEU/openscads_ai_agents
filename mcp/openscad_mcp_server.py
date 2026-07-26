@@ -92,9 +92,10 @@ TOOLS: list[dict[str, Any]] = [
     _tool("get_editor_code", "Read the current OpenSCAD editor contents before editing an existing design."),
     _tool(
         "set_editor_code",
-        "Apply a COMPLETE OpenSCAD script to the editor and run F6 render. "
+        "Apply a COMPLETE OpenSCAD script to the editor and run a fast F5 CSG preview. "
         "Always pass the FULL file. Never paste OpenSCAD into chat. "
-        "After success, call get_model_info and get_preview_image to verify quality.",
+        "While iterating, verify with get_model_info and get_preview_image. "
+        "Do NOT call trigger_render until the design looks correct.",
         {
             "type": "object",
             "properties": {
@@ -111,14 +112,29 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _tool(
         "trigger_preview",
-        "Run a full F6 render of the current editor contents and return render status.",
+        "Run a fast F5 CSG preview of the current editor contents (no full mesh). "
+        "Use while iterating / checking. Prefer this over trigger_render mid-design.",
+        read_only=False,
+        destructive=False,
+    ),
+    _tool(
+        "trigger_render",
+        "Run a full F6 mesh render (slow) of the current editor contents. "
+        "Call ONCE when the design is final and ready for export/measure. "
+        "Alias: trigger_build.",
+        read_only=False,
+        destructive=False,
+    ),
+    _tool(
+        "trigger_build",
+        "Alias for trigger_render: full F6 mesh render. Use only when the design is final.",
         read_only=False,
         destructive=False,
     ),
     _tool(
         "get_model_info",
-        "Return last/current render facts: success, empty, errors, warnings, "
-        "bounding box (mm), facets, and log. Use after set_editor_code.",
+        "Return last/current preview or render facts: success, empty, errors, warnings, "
+        "bounding box (mm), facets (after F6), and log. Use after set_editor_code / preview.",
     ),
     _tool(
         "get_preview_image",
@@ -288,11 +304,12 @@ def build_prompt_messages(name: str, arguments: dict[str, Any] | None) -> list[d
             "Tool order:\n"
             "1) get_skill (if needed)\n"
             "2) get_cheatsheet (optional)\n"
-            "3) set_editor_code with FULL script\n"
+            "3) set_editor_code with FULL script (runs F5 preview)\n"
             "4) get_model_info\n"
             "5) view_all then get_preview_image — judge proportions visually\n"
             "6) repair with set_editor_code at most twice if needed\n"
-            "Never paste OpenSCAD into chat.\n\n"
+            "7) When the design looks right, call trigger_render ONCE (F6 full mesh)\n"
+            "Never paste OpenSCAD into chat. Do not call trigger_render while still iterating.\n\n"
             f"User request:\n{request}"
         )
         return [{"role": "user", "content": {"type": "text", "text": text}}]
@@ -303,7 +320,8 @@ def build_prompt_messages(name: str, arguments: dict[str, Any] | None) -> list[d
             "Improve the current OpenSCAD model using MCP tools.\n"
             f"Skill:\n{skill_block}\n\n"
             "Order: get_editor_code → get_model_info → get_preview_image → "
-            "plan changes → set_editor_code → get_model_info → get_preview_image.\n"
+            "plan changes → set_editor_code (F5) → get_model_info → get_preview_image → "
+            "trigger_render once when final.\n"
             f"Improvement goal:\n{goal}"
         )
         return [{"role": "user", "content": {"type": "text", "text": text}}]
@@ -313,7 +331,8 @@ def build_prompt_messages(name: str, arguments: dict[str, Any] | None) -> list[d
         text = (
             "Fix OpenSCAD render/parser problems using MCP tools.\n"
             "Order: get_console_log → get_editor_code → get_model_info → "
-            "set_editor_code (full fixed script) → get_model_info → get_preview_image.\n"
+            "set_editor_code (full fixed script, F5 preview) → get_model_info → get_preview_image. "
+            "Call trigger_render only after the preview looks correct.\n"
             f"Extra notes: {notes or '(none)'}"
         )
         return [{"role": "user", "content": {"type": "text", "text": text}}]
@@ -470,14 +489,16 @@ def handle_rpc(msg: dict[str, Any]) -> dict[str, Any] | None:
                     "version": SERVER_VERSION,
                 },
                 "instructions": (
-                    "OpenSCAD CAD MCP with 17 tools + openscad-cad skill. "
+                    "OpenSCAD CAD MCP with 19 tools + openscad-cad skill. "
                     "ALWAYS call get_skill(name=openscad-cad) before complex designs. "
                     "Never paste OpenSCAD into chat — use set_editor_code with the FULL script. "
-                    "After every render: get_model_info then get_preview_image to verify visually. "
+                    "set_editor_code and trigger_preview run fast F5 CSG preview only. "
+                    "Iterate with preview + get_model_info + get_preview_image. "
+                    "Call trigger_render (or trigger_build) ONCE when the design is final (F6 mesh). "
                     "Use pan_view / zoom_in / zoom_out / zoom_100 / view_all to inspect, then get_preview_image. "
                     "Available tools: list_tools, list_skills, get_skill, get_cheatsheet, "
-                    "get_editor_code, set_editor_code, trigger_preview, get_model_info, "
-                    "get_preview_image, get_console_log, get_camera_info, pan_view, "
+                    "get_editor_code, set_editor_code, trigger_preview, trigger_render, trigger_build, "
+                    "get_model_info, get_preview_image, get_console_log, get_camera_info, pan_view, "
                     "zoom_in, zoom_out, zoom_100, view_all, reset_view. "
                     "Prompts: create_model, improve_model, fix_render."
                 ),

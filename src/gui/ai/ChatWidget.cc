@@ -32,11 +32,16 @@
 #include <QThread>
 #include <QPalette>
 #include <QMenu>
+#include <QWidgetAction>
+#include <QToolButton>
 #include <QMessageBox>
 #include <QAction>
 #include <QSettings>
 #include <QUuid>
+#include <QDate>
 #include <QDateTime>
+#include <QHash>
+#include <QVector>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -163,6 +168,20 @@ void storeSavedChatsArray(const QJsonArray& chats)
 {
   QSettings settings;
   settings.setValue(kSavedChatsSettingsKey, QJsonDocument(chats).toJson(QJsonDocument::Compact));
+}
+
+QString formatChatTimestamp(qint64 timestamp)
+{
+  if (timestamp <= 0) return {};
+  return QDateTime::fromMSecsSinceEpoch(timestamp).toString(QStringLiteral("HH:mm - dd/MM/yyyy"));
+}
+
+QString chatDayGroupLabel(const QDate& date)
+{
+  const QDate today = QDate::currentDate();
+  if (date == today) return QObject::tr("Today");
+  if (date == today.addDays(-1)) return QObject::tr("Yesterday");
+  return date.toString(QStringLiteral("dd/MM/yyyy"));
 }
 
 QPushButton *makeHeaderIconButton(const QString& objectName, const QIcon& icon, const QString& tip,
@@ -700,8 +719,8 @@ void ChatWidget::onSendPressed()
       QMetaObject::invokeMethod(qApp, [this, alive]() {
         if (!*alive || !isRequestRunning) return;
 
-        // Hold the final chat reply + unlock until F6 render finishes so code,
-        // chat response, and rendered geometry (exportable) land together.
+        // Hold the final chat reply + unlock until F5 preview finishes so code,
+        // chat response, and preview geometry land together.
         const bool needRender = pendingPreviewRender;
         pendingPreviewRender = false;
 
@@ -770,7 +789,7 @@ void ChatWidget::onSendPressed()
             break;
           }
           if (mw) {
-            mw->startAIFullRender([finishTurn](const AIRenderResult&) { finishTurn(); });
+            mw->startAIPreview([finishTurn](const AIRenderResult&) { finishTurn(); });
             return;
           }
         }
@@ -1040,27 +1059,350 @@ void ChatWidget::onHistoryPressed()
 {
   QMenu menu(this);
   menu.setObjectName(QStringLiteral("chatHistoryMenu"));
+  menu.setMinimumWidth(380);
+  menu.setMaximumWidth(380);
+  menu.setMaximumHeight(560);
 
+  const bool dark = isDarkTheme();
+  menu.setStyleSheet(QStringLiteral(R"(
+    QMenu#chatHistoryMenu {
+      background: %1;
+      color: %2;
+      border: 1px solid %3;
+      border-radius: 12px;
+      padding: 6px 6px 4px 6px;
+    }
+    QMenu#chatHistoryMenu::separator {
+      height: 1px;
+      background: %3;
+      margin: 6px 6px;
+    }
+    QWidget#historyHeader, QWidget#historySearchWrap,
+    QWidget#historyRow, QWidget#historyFooter, QWidget#historyGroup {
+      background: transparent;
+      border: none;
+    }
+    QLabel#historyTitle {
+      color: %2;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+    QLabel#historyGroupLabel {
+      color: %4;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      padding: 2px 2px 0 2px;
+    }
+    QLabel#historyRowTitle {
+      color: %2;
+      font-size: 12px;
+      font-weight: 600;
+      background: transparent;
+    }
+    QLabel#historyRowTime {
+      color: %4;
+      font-size: 10px;
+      font-weight: 400;
+      background: transparent;
+    }
+    QWidget#historyRow[selected="true"] {
+      background: %5;
+      border-radius: 8px;
+    }
+    QWidget#historyRow:hover {
+      background: %6;
+      border-radius: 8px;
+    }
+    QPushButton#historyOpenButton {
+      background: transparent;
+      border: none;
+      padding: 0;
+      text-align: left;
+    }
+    QPushButton#historyOpenButton:hover {
+      background: transparent;
+    }
+    QToolButton#historyCloseButton, QToolButton#historyDeleteButton {
+      background: transparent;
+      border: none;
+      border-radius: 6px;
+      color: %4;
+      font-size: 15px;
+      padding: 0px;
+    }
+    QToolButton#historyCloseButton:hover, QToolButton#historyDeleteButton:hover {
+      background: %7;
+      color: %2;
+    }
+    QLineEdit#historySearch {
+      min-height: 28px;
+      background: %8;
+      color: %2;
+      border: 1px solid %3;
+      border-radius: 8px;
+      padding: 1px 10px;
+      font-size: 11px;
+      selection-background-color: %5;
+    }
+    QPushButton#historyClearButton {
+      background: transparent;
+      color: %4;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    QPushButton#historyClearButton:hover {
+      background: %7;
+      color: %2;
+    }
+    QLabel#historyEmptyLabel {
+      color: %4;
+      font-size: 11px;
+      padding: 14px 8px;
+    }
+  )")
+                       .arg(dark ? QStringLiteral("#252526") : QStringLiteral("#ffffff"),
+                            dark ? QStringLiteral("#f0f0f0") : QStringLiteral("#1f1f1f"),
+                            dark ? QStringLiteral("#3b3b3d") : QStringLiteral("#e3e3e6"),
+                            dark ? QStringLiteral("#9a9aa0") : QStringLiteral("#6f6f76"),
+                            dark ? QStringLiteral("#1d3f66") : QStringLiteral("#e8f1ff"),
+                            dark ? QStringLiteral("#323234") : QStringLiteral("#f3f3f5"),
+                            dark ? QStringLiteral("#414144") : QStringLiteral("#e8e8eb"),
+                            dark ? QStringLiteral("#1e1e1f") : QStringLiteral("#f6f6f7")));
+
+  // Header
+  auto *headerAction = new QWidgetAction(&menu);
+  auto *header = new QWidget(&menu);
+  header->setObjectName(QStringLiteral("historyHeader"));
+  auto *headerLayout = new QHBoxLayout(header);
+  headerLayout->setContentsMargins(10, 4, 4, 2);
+  auto *heading = new QLabel(_("Chat history"), header);
+  heading->setObjectName(QStringLiteral("historyTitle"));
+  headerLayout->addWidget(heading);
+  headerLayout->addStretch(1);
+  auto *close = new QToolButton(header);
+  close->setObjectName(QStringLiteral("historyCloseButton"));
+  close->setText(QStringLiteral("×"));
+  close->setFixedSize(24, 24);
+  close->setCursor(Qt::PointingHandCursor);
+  connect(close, &QToolButton::clicked, &menu, &QMenu::close);
+  headerLayout->addWidget(close);
+  headerAction->setDefaultWidget(header);
+  menu.addAction(headerAction);
+
+  // Search
+  auto *searchAction = new QWidgetAction(&menu);
+  auto *searchWrap = new QWidget(&menu);
+  searchWrap->setObjectName(QStringLiteral("historySearchWrap"));
+  auto *searchLayout = new QHBoxLayout(searchWrap);
+  searchLayout->setContentsMargins(6, 4, 6, 4);
+  auto *search = new QLineEdit(searchWrap);
+  search->setObjectName(QStringLiteral("historySearch"));
+  search->setPlaceholderText(_("Search chats…"));
+  search->setClearButtonEnabled(true);
+  searchLayout->addWidget(search);
+  searchAction->setDefaultWidget(searchWrap);
+  menu.addAction(searchAction);
+  menu.addSeparator();
+
+  struct HistoryItem {
+    QJsonObject obj;
+    QString id;
+    QString title;
+    qint64 updatedAt = 0;
+  };
+  QVector<HistoryItem> items;
   const QJsonArray chats = loadSavedChatsArray();
-  bool hasEntries = false;
+  items.reserve(chats.size());
   for (const QJsonValue& value : chats) {
     const QJsonObject obj = value.toObject();
     const QString id = obj.value(QStringLiteral("id")).toString();
-    const QString title = obj.value(QStringLiteral("title")).toString(_("Untitled chat"));
     if (id.isEmpty()) continue;
+    HistoryItem item;
+    item.obj = obj;
+    item.id = id;
+    item.title = obj.value(QStringLiteral("title")).toString(_("Untitled chat"));
+    item.updatedAt = obj.value(QStringLiteral("updatedAt")).toVariant().toLongLong();
+    items.push_back(item);
+  }
+  std::stable_sort(items.begin(), items.end(), [](const HistoryItem& a, const HistoryItem& b) {
+    return a.updatedAt > b.updatedAt;
+  });
+
+  struct SearchableEntry {
+    QWidgetAction *action = nullptr;
+    QWidgetAction *groupAction = nullptr;
+    QString title;
+  };
+  struct GroupBucket {
+    QWidgetAction *header = nullptr;
+    int childCount = 0;
+  };
+  QVector<SearchableEntry> entries;
+  QVector<GroupBucket> groups;
+  QDate lastGroupDate;
+  bool hasGroupDate = false;
+  bool hasEntries = false;
+
+  for (const HistoryItem& item : items) {
     hasEntries = true;
-    QAction *action = menu.addAction(title);
-    action->setCheckable(true);
-    action->setChecked(id == currentSessionId);
-    connect(action, &QAction::triggered, this, [this, id]() { loadSession(id); });
+    const QDate itemDate =
+      item.updatedAt > 0 ? QDateTime::fromMSecsSinceEpoch(item.updatedAt).date() : QDate();
+
+    QWidgetAction *groupAction = nullptr;
+    if (!hasGroupDate || itemDate != lastGroupDate) {
+      hasGroupDate = true;
+      lastGroupDate = itemDate;
+
+      groupAction = new QWidgetAction(&menu);
+      auto *groupWrap = new QWidget(&menu);
+      groupWrap->setObjectName(QStringLiteral("historyGroup"));
+      auto *groupLayout = new QHBoxLayout(groupWrap);
+      groupLayout->setContentsMargins(10, 8, 10, 2);
+      auto *groupLabel = new QLabel(
+        itemDate.isValid() ? chatDayGroupLabel(itemDate) : _("Older"), groupWrap);
+      groupLabel->setObjectName(QStringLiteral("historyGroupLabel"));
+      groupLayout->addWidget(groupLabel);
+      groupLayout->addStretch(1);
+      groupAction->setDefaultWidget(groupWrap);
+      menu.addAction(groupAction);
+      groups.push_back({groupAction, 0});
+    } else if (!groups.isEmpty()) {
+      groupAction = groups.last().header;
+    }
+    if (!groups.isEmpty()) groups.last().childCount += 1;
+
+    auto *action = new QWidgetAction(&menu);
+    auto *row = new QWidget(&menu);
+    row->setObjectName(QStringLiteral("historyRow"));
+    row->setProperty("selected", item.id == currentSessionId);
+    row->setMinimumHeight(44);
+    auto *rowLayout = new QHBoxLayout(row);
+    rowLayout->setContentsMargins(4, 2, 4, 2);
+    rowLayout->setSpacing(2);
+
+    auto *open = new QPushButton(row);
+    open->setObjectName(QStringLiteral("historyOpenButton"));
+    open->setCursor(Qt::PointingHandCursor);
+    open->setFocusPolicy(Qt::NoFocus);
+    open->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    auto *openLayout = new QVBoxLayout(open);
+    openLayout->setContentsMargins(8, 6, 4, 6);
+    openLayout->setSpacing(2);
+
+    const QString displayTitle =
+      item.title.size() > 48 ? item.title.left(45) + QStringLiteral("…") : item.title;
+    auto *titleLabel = new QLabel(displayTitle, open);
+    titleLabel->setObjectName(QStringLiteral("historyRowTitle"));
+    titleLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+    titleLabel->setWordWrap(false);
+    openLayout->addWidget(titleLabel);
+
+    const QString timeText = formatChatTimestamp(item.updatedAt);
+    if (!timeText.isEmpty()) {
+      auto *timeLabel = new QLabel(timeText, open);
+      timeLabel->setObjectName(QStringLiteral("historyRowTime"));
+      timeLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+      openLayout->addWidget(timeLabel);
+    }
+
+    connect(open, &QPushButton::clicked, this, [this, id = item.id, &menu]() {
+      menu.close();
+      loadSession(id);
+    });
+    rowLayout->addWidget(open, 1);
+
+    auto *remove = new QToolButton(row);
+    remove->setObjectName(QStringLiteral("historyDeleteButton"));
+    remove->setText(QStringLiteral("×"));
+    remove->setToolTip(_("Delete this chat"));
+    remove->setFixedSize(24, 24);
+    remove->setCursor(Qt::PointingHandCursor);
+    connect(remove, &QToolButton::clicked, this, [action, groupAction, id = item.id, &groups]() {
+      QJsonArray kept;
+      for (const QJsonValue& saved : loadSavedChatsArray()) {
+        if (saved.toObject().value(QStringLiteral("id")).toString() != id) kept.append(saved);
+      }
+      storeSavedChatsArray(kept);
+      action->setVisible(false);
+      if (groupAction) {
+        for (GroupBucket& group : groups) {
+          if (group.header != groupAction) continue;
+          group.childCount = qMax(0, group.childCount - 1);
+          if (group.childCount == 0) group.header->setVisible(false);
+          break;
+        }
+      }
+    });
+    rowLayout->addWidget(remove, 0, Qt::AlignVCenter);
+
+    action->setDefaultWidget(row);
+    menu.addAction(action);
+    entries.push_back({action, groupAction, item.title});
   }
 
   if (!hasEntries) {
-    QAction *empty = menu.addAction(_("No chat history yet"));
-    empty->setEnabled(false);
+    auto *emptyAction = new QWidgetAction(&menu);
+    auto *empty = new QLabel(_("No chat history yet"), &menu);
+    empty->setObjectName(QStringLiteral("historyEmptyLabel"));
+    empty->setAlignment(Qt::AlignCenter);
+    emptyAction->setDefaultWidget(empty);
+    menu.addAction(emptyAction);
+    search->setEnabled(false);
+  } else {
+    menu.addSeparator();
+    auto *footerAction = new QWidgetAction(&menu);
+    auto *footer = new QWidget(&menu);
+    footer->setObjectName(QStringLiteral("historyFooter"));
+    auto *footerLayout = new QHBoxLayout(footer);
+    footerLayout->setContentsMargins(4, 2, 4, 4);
+    footerLayout->addStretch(1);
+    auto *clearAll = new QPushButton(_("Clear history…"), footer);
+    clearAll->setObjectName(QStringLiteral("historyClearButton"));
+    clearAll->setCursor(Qt::PointingHandCursor);
+    connect(clearAll, &QPushButton::clicked, this, [&menu]() {
+      const auto answer = QMessageBox::question(
+        &menu, _("Clear history"), _("Delete all saved chats? This cannot be undone."),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+      if (answer != QMessageBox::Yes) return;
+      storeSavedChatsArray({});
+      menu.close();
+    });
+    footerLayout->addWidget(clearAll);
+    footerLayout->addStretch(1);
+    footerAction->setDefaultWidget(footer);
+    menu.addAction(footerAction);
   }
 
-  menu.exec(historyButton->mapToGlobal(QPoint(0, historyButton->height())));
+  connect(search, &QLineEdit::textChanged, &menu, [entries, groups](const QString& query) {
+    const QString q = query.trimmed();
+    QHash<QWidgetAction *, int> visibleByGroup;
+    for (const SearchableEntry& entry : entries) {
+      const bool match = q.isEmpty() || entry.title.contains(q, Qt::CaseInsensitive);
+      entry.action->setVisible(match);
+      if (match && entry.groupAction) visibleByGroup[entry.groupAction] += 1;
+    }
+    for (const GroupBucket& group : groups) {
+      if (!group.header) continue;
+      group.header->setVisible(visibleByGroup.value(group.header, 0) > 0);
+    }
+  });
+
+  // Align the panel's right edge to the history button and keep it on screen.
+  QPoint pos = historyButton->mapToGlobal(QPoint(historyButton->width() - menu.sizeHint().width(),
+                                                 historyButton->height() + 5));
+  if (QScreen *screen = historyButton->screen()) {
+    const QRect area = screen->availableGeometry();
+    pos.setX(qBound(area.left() + 6, pos.x(), area.right() - menu.sizeHint().width() - 6));
+    pos.setY(qBound(area.top() + 6, pos.y(), area.bottom() - menu.sizeHint().height() - 6));
+  }
+  QTimer::singleShot(0, search, [search]() { search->setFocus(); });
+  menu.exec(pos);
 }
 
 void ChatWidget::onSettingsPressed()
@@ -1655,7 +1997,7 @@ void ChatWidget::applyCodeChange(const std::string& code)
   }
   if (mw && mw->activeEditor) {
     mw->activeEditor->setText(QString::fromStdString(code));
-    // Defer full F6 render until the assistant turn finishes (once per turn).
+    // Defer F5 preview until the assistant turn finishes (once per turn).
     pendingPreviewRender = true;
   }
 }
@@ -1670,7 +2012,7 @@ void ChatWidget::flushPendingPreview()
     break;
   }
   if (mw) {
-    mw->startAIFullRender([](const AIRenderResult&) {});
+    mw->startAIPreview([](const AIRenderResult&) {});
   }
 }
 
@@ -1687,8 +2029,11 @@ void ChatWidget::logToolExecution(const std::string& name, const std::string& re
     summary = tr("Applied code changes");
     detail = QString::fromStdString("Tool: set_editor_code\nResult: " + result);
   } else if (name == "trigger_preview") {
-    summary = tr("Queued full render");
+    summary = tr("Queued preview (F5)");
     detail = QString::fromStdString("Tool: trigger_preview\nResult: " + result);
+  } else if (name == "trigger_render" || name == "trigger_build") {
+    summary = tr("Queued full render (F6)");
+    detail = QString::fromStdString("Tool: " + name + "\nResult: " + result);
   } else if (name == "get_preview_image") {
     summary = tr("Captured 3D preview");
     detail = result.rfind("IMAGE_PNG_BASE64:", 0) == 0
@@ -1714,42 +2059,94 @@ void ChatWidget::logToolExecution(const std::string& name, const std::string& re
 std::string ChatWidget::formatRenderResult(const AIRenderResult& rr) const
 {
   std::ostringstream os;
+  const char *modeLabel = rr.isPreview ? "preview (F5)" : "full render (F6)";
   auto appendFacts = [&]() {
     if (rr.hasBoundingBox) {
       os << " Bounding box (mm): " << rr.bboxSize[0] << " x " << rr.bboxSize[1] << " x "
          << rr.bboxSize[2] << ".";
     }
-    if (rr.dimension == 3) {
+    if (!rr.isPreview && rr.dimension == 3) {
       os << " Facets: " << rr.facets << ".";
     }
   };
 
   if (rr.success) {
-    os << "Success: code applied and the F6 render completed with no errors.";
+    os << "Success: code applied and the " << modeLabel << " completed with no errors.";
     appendFacts();
     if (rr.warningCount > 0) {
       os << " Warnings: " << rr.warningCount << ".";
       if (!rr.log.empty()) os << "\n" << rr.log;
     }
-    os << "\nThe model is on screen. Do not call set_editor_code again unless the user asks "
-          "for a change.";
+    if (rr.isPreview) {
+      os << "\nThis is a fast CSG preview only (not a full mesh). Keep iterating with "
+            "set_editor_code / trigger_preview + get_preview_image. When the design looks right, "
+            "call trigger_render once for the final F6 mesh build.";
+    } else {
+      os << "\nFull mesh is ready for export/measure. Do not call set_editor_code again unless "
+            "the user asks for a change.";
+    }
     return os.str();
   }
 
   if (rr.empty && rr.errorCount == 0) {
-    os << "[render-error] Code applied but the render produced NO top-level geometry. Ensure "
+    os << "[render-error] Code applied but the " << modeLabel
+       << " produced NO top-level geometry. Ensure "
           "there is a top-level call to your assembly (or a root union), and that a difference() "
           "did not subtract everything. Fix the code and call set_editor_code again.";
     if (!rr.log.empty()) os << "\n" << rr.log;
     return os.str();
   }
 
-  os << "[render-error] Code applied but the F6 render reported " << rr.errorCount
+  os << "[render-error] Code applied but the " << modeLabel << " reported " << rr.errorCount
      << " error(s)";
   if (rr.warningCount > 0) os << " and " << rr.warningCount << " warning(s)";
   os << ". Fix the OpenSCAD code and call set_editor_code again with the corrected full script.";
   if (!rr.log.empty()) os << "\n" << rr.log;
   return os.str();
+}
+
+std::string ChatWidget::previewAppliedCodeAndDescribe()
+{
+  MainWindow *mw = nullptr;
+  for (auto *win : scadApp->windowManager.getWindows()) {
+    mw = win;
+    break;
+  }
+  if (!mw) {
+    return "Success: Code applied to the editor. A preview (F5) will run when the reply finishes.";
+  }
+
+  // Synchronous preview — cancel any deferred end-of-turn compile.
+  pendingPreviewRender = false;
+
+  AIRenderResult rr;
+  bool got = false;
+  QEventLoop loop;
+  activeRenderLoop = &loop;
+  mw->startAIPreview([this, &rr, &got, &loop](const AIRenderResult& r) {
+    rr = r;
+    got = true;
+    if (activeRenderLoop == &loop) {
+      activeRenderLoop = nullptr;
+    }
+    loop.quit();
+  });
+  if (!got) {
+    loop.exec();
+  }
+  activeRenderLoop = nullptr;
+
+  if (!got) {
+    return "Cancelled: the preview was interrupted by the user.";
+  }
+
+  cacheRenderResult(rr);
+
+  if (activeAIBubble) {
+    activeAIBubble->updateText(rr.success ? tr("Previewed in 3D view…")
+                                          : tr("Preview reported problems…"));
+  }
+  return formatRenderResult(rr);
 }
 
 std::string ChatWidget::renderAppliedCodeAndDescribe()
@@ -1760,7 +2157,6 @@ std::string ChatWidget::renderAppliedCodeAndDescribe()
     break;
   }
   if (!mw) {
-    // No window available: fall back to the deferred end-of-turn render (no feedback).
     return "Success: Code applied to the editor. A full render (F6) will run when the reply "
            "finishes.";
   }
@@ -1793,7 +2189,7 @@ std::string ChatWidget::renderAppliedCodeAndDescribe()
   cacheRenderResult(rr);
 
   if (activeAIBubble) {
-    activeAIBubble->updateText(rr.success ? tr("Applied code to the editor…")
+    activeAIBubble->updateText(rr.success ? tr("Full render complete…")
                                           : tr("Render reported problems…"));
   }
   return formatRenderResult(rr);
@@ -1969,15 +2365,23 @@ std::string ChatWidget::executeTool(const std::string& name, const std::string& 
     }
     this->applyCodeChange(code);
     appliedCodeThisTurn = true;
-    if (activeAIBubble) activeAIBubble->updateText(tr("Rendering…"));
-    result_val = renderAppliedCodeAndDescribe();
+    if (activeAIBubble) activeAIBubble->updateText(tr("Previewing…"));
+    result_val = previewAppliedCodeAndDescribe();
   } else if (name == "trigger_preview") {
     if (mw) {
-      if (activeAIBubble) activeAIBubble->updateText(tr("Rendering…"));
-      result_val = renderAppliedCodeAndDescribe();
+      if (activeAIBubble) activeAIBubble->updateText(tr("Previewing…"));
+      result_val = previewAppliedCodeAndDescribe();
     } else {
       pendingPreviewRender = true;
-      result_val = "Success: Full render queued; it will run once when the reply finishes.";
+      result_val = "Success: Preview (F5) queued; it will run once when the reply finishes.";
+    }
+  } else if (name == "trigger_render" || name == "trigger_build") {
+    if (mw) {
+      if (activeAIBubble) activeAIBubble->updateText(tr("Full rendering…"));
+      result_val = renderAppliedCodeAndDescribe();
+    } else {
+      result_val =
+        "Error: No OpenSCAD window available for full render (F6). Apply code first, then retry.";
     }
   } else if (name == "get_model_info") {
     result_val = formatModelInfo();
@@ -2025,8 +2429,9 @@ std::string ChatWidget::executeTool(const std::string& name, const std::string& 
       "- Common: cube([x,y,z], center=true); cylinder(h=h, d=d, center=true); "
       "sphere(d=d); linear_extrude(height=h) polygon(...); rotate_extrude() ...\n"
       "- Fillet/rounding last; reduce radius if boolean/minkowski fails.\n"
-      "- Always apply scripts with set_editor_code (full file). Then verify with "
-      "get_model_info / get_preview_image.\n"
+      "- Always apply scripts with set_editor_code (full file) — that runs F5 preview. "
+      "Verify with get_model_info / get_preview_image while iterating.\n"
+      "- Call trigger_render (alias trigger_build) once when the design is final (F6 mesh).\n"
       "- For full workflow call get_skill name=openscad-cad (or compact=true).";
   } else if (name == "get_camera_info") {
     if (mw && mw->qglview) {
@@ -2141,12 +2546,12 @@ std::string ChatWidget::executeTool(const std::string& name, const std::string& 
     }
   } else if (name == "list_tools") {
     result_val =
-      "get_editor_code, set_editor_code, trigger_preview, get_model_info, get_preview_image, "
-      "get_console_log, list_skills, get_skill, get_cheatsheet, get_camera_info, pan_view, "
-      "zoom_in, zoom_out, zoom_100, view_all, reset_view, list_tools\n"
+      "get_editor_code, set_editor_code, trigger_preview, trigger_render, trigger_build, "
+      "get_model_info, get_preview_image, get_console_log, list_skills, get_skill, get_cheatsheet, "
+      "get_camera_info, pan_view, zoom_in, zoom_out, zoom_100, view_all, reset_view, list_tools\n"
       "Recommended workflow: get_skill(openscad-cad) → get_editor_code (if editing) → "
-      "set_editor_code → get_model_info → get_preview_image → pan_view/zoom_*/view_all if needed → "
-      "repair if needed.";
+      "set_editor_code (F5 preview) → get_model_info → get_preview_image → iterate with "
+      "set_editor_code/trigger_preview → when done call trigger_render (F6) once.";
   } else {
     result_val = "Error: Unknown tool name '" + name + "'. Call list_tools for the catalog.";
   }

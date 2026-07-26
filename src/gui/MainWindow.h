@@ -75,10 +75,11 @@ class AIDock;
 
 class UXTest;
 
-// Outcome of an AI-triggered F6 render, fed back to the agent so it can self-correct.
+// Outcome of an AI-triggered preview (F5) or full render (F6).
 struct AIRenderResult {
   bool success = false;        // Geometry produced with no compile errors.
   bool empty = false;          // Compiled but produced no top-level geometry.
+  bool isPreview = false;      // true = F5 CSG preview; false = F6 mesh render.
   int errorCount = 0;
   int warningCount = 0;
   unsigned int dimension = 0;  // 2 or 3 when geometry exists.
@@ -381,8 +382,9 @@ protected:
   bool eventFilter(QObject *obj, QEvent *event) override;
 
 public:
-  /*! Full F6 render for AI turns; invokes onComplete once when compile/render ends.
-   *  Not a slot: uses std::function<void(const AIRenderResult&)>, which moc mis-parses. */
+  /*! F5 CSG preview for AI turns (fast). Prefer this while iterating. */
+  void startAIPreview(std::function<void(const AIRenderResult&)> onComplete);
+  /*! Full F6 mesh render for AI turns (slow). Use when the design is final. */
   void startAIFullRender(std::function<void(const AIRenderResult&)> onComplete);
   void cancelAIFullRenderCallback();
   AIRenderResult collectAIRenderResult();
@@ -453,6 +455,7 @@ public slots:
   void updateViewModeAfterGLInit();
   void on_viewActionShowEdges_toggled(bool checked);
   void on_viewActionShowAxes_toggled(bool checked);
+  void on_viewActionShowFloor_toggled(bool checked);
   void on_viewActionShowScaleProportional_toggled(bool checked);
   void on_viewActionShowCrosshairs_toggled(bool checked);
   void on_viewActionTop_triggered();

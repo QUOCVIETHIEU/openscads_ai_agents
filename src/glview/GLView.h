@@ -55,6 +55,8 @@ public:
 
   [[nodiscard]] bool showAxes() const { return this->showaxes; }
   void setShowAxes(bool enabled) { this->showaxes = enabled; }
+  [[nodiscard]] bool showFloor() const { return this->showfloor; }
+  void setShowFloor(bool enabled) { this->showfloor = enabled; }
   [[nodiscard]] bool showScaleProportional() const { return this->showscale; }
   void setShowScaleProportional(bool enabled) { this->showscale = enabled; }
   [[nodiscard]] bool showEdges() const { return this->showedges; }
@@ -73,6 +75,7 @@ public:
   double far_far_away;
   double aspectratio;
   bool showaxes;
+  bool showfloor;
   bool showedges;
   bool showcrosshairs;
   bool showscale;
@@ -93,6 +96,7 @@ public:
 private:
   void showCrosshairs(const Color4f& col);
   void showAxes(const Color4f& col);
+  void showFloor(const Color4f& col);
   void showSmallaxes(const Color4f& col);
   void showScalemarkers(const Color4f& col);
   void decodeMarkerValue(double i, double l, int size_div_sm);

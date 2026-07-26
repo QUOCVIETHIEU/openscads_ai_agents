@@ -485,24 +485,27 @@ void AISettingsPanel::buildUi()
     "<li style='margin-bottom:4px;'><b>get_cheatsheet</b> — %2</li>"
     "<li style='margin-bottom:4px;'><b>set_editor_code</b> — %3</li>"
     "<li style='margin-bottom:4px;'><b>get_editor_code / trigger_preview</b> — %4</li>"
-    "<li style='margin-bottom:4px;'><b>get_model_info</b> — %5</li>"
-    "<li style='margin-bottom:4px;'><b>get_preview_image</b> — %6</li>"
-    "<li style='margin-bottom:4px;'><b>get_console_log</b> — %7</li>"
-    "<li style='margin-bottom:4px;'><b>get_camera_info / pan_view / zoom_in / zoom_out / zoom_100 / view_all / reset_view</b> — %8</li>"
-    "<li style='margin-bottom:0;'><b>list_tools</b> — %9</li>"
+    "<li style='margin-bottom:4px;'><b>trigger_render / trigger_build</b> — %5</li>"
+    "<li style='margin-bottom:4px;'><b>get_model_info</b> — %6</li>"
+    "<li style='margin-bottom:4px;'><b>get_preview_image</b> — %7</li>"
+    "<li style='margin-bottom:4px;'><b>get_console_log</b> — %8</li>"
+    "<li style='margin-bottom:4px;'><b>get_camera_info / pan_view / zoom_in / zoom_out / zoom_100 / view_all / reset_view</b> — %9</li>"
+    "<li style='margin-bottom:0;'><b>list_tools</b> — %10</li>"
     "</ul>"
-    "<p style='margin:8px 0 0 0; opacity:0.85;'>%10</p>")
+    "<p style='margin:8px 0 0 0; opacity:0.85;'>%11</p>")
     .arg(_("load bundled CAD workflow skills (openscad-cad)"),
          _("short OpenSCAD syntax reference"),
-         _("apply a full OpenSCAD script and render (F6)"),
-         _("read editor / re-render current code"),
-         _("bbox, facets, errors after render"),
+         _("apply a full OpenSCAD script and F5 preview"),
+         _("read editor / re-run F5 preview"),
+         _("full F6 mesh render — only when design is final"),
+         _("bbox, errors after preview or render"),
          _("capture 3D viewport PNG so the model can be judged visually"),
          _("recent console / parser messages"),
          _("camera read, pan, zoom in/out/100%, and framing helpers"),
          _("catalog of tools and recommended order"),
          _("Prompts: create_model, improve_model, fix_render. "
-           "Best workflow: get_skill → set_editor_code → get_model_info → get_preview_image.")));
+           "Best workflow: get_skill → set_editor_code (F5) → get_model_info → "
+           "get_preview_image → trigger_render once when done.")));
   mcp->addWidget(mcpTools);
   mcp->addStretch(1);
 

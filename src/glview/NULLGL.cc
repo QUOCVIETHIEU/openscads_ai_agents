@@ -76,6 +76,9 @@ void GLView::setRenderer(std::shared_ptr<Renderer>)
 void GLView::showAxes(const Color4f& col)
 {
 }
+void GLView::showFloor(const Color4f& col)
+{
+}
 void GLView::showCrosshairs(const Color4f& col)
 {
 }
