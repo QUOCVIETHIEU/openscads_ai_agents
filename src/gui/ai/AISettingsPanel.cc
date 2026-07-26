@@ -188,6 +188,19 @@ void AISettingsPanel::reloadFromDisk()
   loadSettings();
 }
 
+void AISettingsPanel::setCurrentTab(int index)
+{
+  if (!tabs) return;
+  if (index < 0 || index >= tabs->count()) return;
+  tabs->setCurrentIndex(index);
+}
+
+void AISettingsPanel::showMcpServerTab()
+{
+  // Keep in sync with addTab order in buildUi().
+  setCurrentTab(3);
+}
+
 void AISettingsPanel::scheduleAutoSave()
 {
   if (!autoSave || loading) return;

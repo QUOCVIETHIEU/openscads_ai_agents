@@ -1065,10 +1065,27 @@ void ChatWidget::onHistoryPressed()
 
 void ChatWidget::onSettingsPressed()
 {
-  AIApiKeyDialog::prompt(this);
+  AIApiKeyDialog::prompt(this, 0);
 
   // The MCP enable checkbox may have changed inside the dialog — reconcile the
   // local bridge so the badge reflects the live state.
+  if (AIFreeAgents::mcpEnabled()) {
+    if (!OpenSCADAiBridge::instance().isRunning()) {
+      OpenSCADAiBridge::instance().setDesiredPort(0);
+      OpenSCADAiBridge::instance().start();
+    }
+  } else if (OpenSCADAiBridge::instance().isRunning()) {
+    OpenSCADAiBridge::instance().stop();
+  }
+
+  updateAgentButton();
+  updateMcpBadge();
+}
+
+void ChatWidget::onMcpSettingsPressed()
+{
+  AIApiKeyDialog::prompt(this, 3);
+
   if (AIFreeAgents::mcpEnabled()) {
     if (!OpenSCADAiBridge::instance().isRunning()) {
       OpenSCADAiBridge::instance().setDesiredPort(0);
@@ -1345,7 +1362,7 @@ void ChatWidget::setupCursorComposer()
   mcpBadge->setCursor(Qt::PointingHandCursor);
   mcpBadge->setFocusPolicy(Qt::NoFocus);
   mcpBadge->setIconSize(QSize(9, 9));
-  connect(mcpBadge, &QPushButton::clicked, this, &ChatWidget::onSettingsPressed);
+  connect(mcpBadge, &QPushButton::clicked, this, &ChatWidget::onMcpSettingsPressed);
   toolbarLayout->addWidget(mcpBadge);
 
   toolbarLayout->addStretch(1);
@@ -1397,13 +1414,13 @@ void ChatWidget::updateMcpBadge()
 
   if (live) {
     mcpBadge->setToolTip(
-      tr("MCP bridge is ON — OpenSCAD tools are exposed to AI agents.\nClick to open AI Settings."));
+      tr("MCP bridge is ON — OpenSCAD tools are exposed to AI agents.\nClick to open MCP Server settings."));
   } else if (enabled) {
     mcpBadge->setToolTip(
-      tr("MCP is enabled but the local bridge is not running yet.\nClick to open AI Settings."));
+      tr("MCP is enabled but the local bridge is not running yet.\nClick to open MCP Server settings."));
   } else {
     mcpBadge->setToolTip(
-      tr("MCP bridge is OFF — agents fall back to plain chat.\nClick to open AI Settings."));
+      tr("MCP bridge is OFF — agents fall back to plain chat.\nClick to open MCP Server settings."));
   }
 
   // Refined pill: fully rounded, soft state-tinted fill, no harsh border.

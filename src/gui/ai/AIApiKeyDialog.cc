@@ -64,7 +64,13 @@ AIApiKeyDialog::AIApiKeyDialog(QWidget *parent) : QDialog(parent)
 
 int AIApiKeyDialog::prompt(QWidget *parent)
 {
+  return prompt(parent, 0);
+}
+
+int AIApiKeyDialog::prompt(QWidget *parent, int tabIndex)
+{
   AIApiKeyDialog dialog(parent);
+  if (dialog.panel) dialog.panel->setCurrentTab(tabIndex);
   return dialog.exec();
 }
 

@@ -84,6 +84,7 @@ private slots:
   void onClearPressed();
   void onHistoryPressed();
   void onSettingsPressed();
+  void onMcpSettingsPressed();
   void onTogglePanelPressed();
   void onAttachPressed();
   void onImagePasted(const QImage& image);
