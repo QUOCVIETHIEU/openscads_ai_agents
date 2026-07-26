@@ -10,6 +10,7 @@
 #include <QIODevice>
 #include <QIcon>
 #include <QLabel>
+#include <QLineEdit>
 #include <QList>
 #include <QMainWindow>
 #include <QMap>
@@ -134,7 +135,7 @@ public:
   bool bottomPanelMaximized{false};
   QWidget *previewHeaderRow = nullptr;
   QWidget *zoomControlGroup = nullptr;
-  QLabel *zoomPercentLabel = nullptr;
+  QLineEdit *zoomPercentEdit = nullptr;
 
   std::shared_ptr<const Geometry> rootGeom;
   std::shared_ptr<Renderer> geomRenderer;
@@ -200,6 +201,7 @@ private:
   void setupZoomControls();
   void styleZoomControls();
   void updateZoomPercentLabel();
+  void applyZoomPercentFromEdit();
 
 protected:
   void closeEvent(QCloseEvent *event) override;
@@ -556,6 +558,7 @@ private:
   void resetMeasurementsState(bool enable, const QString& tooltipMessage);
   void requestFitViewAfterRender();
   void applyPendingFitView();
+  void fitViewToModel();
   bool pendingFitViewAfterRender = false;
   QActionGroup *measurementGroup;
   QAction *activeMeasurement = nullptr;

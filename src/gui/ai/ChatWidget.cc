@@ -1750,7 +1750,7 @@ void ChatWidget::setupCursorComposer()
     delete item;
   }
 
-  inputLayout->setContentsMargins(10, 8, 10, 10);
+  inputLayout->setContentsMargins(3, 3, 3, 3);
   inputLayout->setSpacing(0);
 
   QFrame *composer = new QFrame(inputWidget);
@@ -1870,7 +1870,7 @@ void ChatWidget::updateMcpBadge()
 
   mcpBadge->setStyleSheet(QStringLiteral(R"(
     QPushButton#mcpBadge {
-      border: 1px solid %4;
+      border: none;
       border-radius: 4px;
       padding: 0px 8px 0px 6px;
       color: %1;
@@ -1883,8 +1883,7 @@ void ChatWidget::updateMcpBadge()
     QPushButton#mcpBadge:hover { background: %3; }
     QPushButton#mcpBadge:pressed { padding-top: 1px; }
   )")
-                            .arg(text, bg, hover,
-                                 dark ? QStringLiteral("#2b2b2b") : QStringLiteral("#e5e5e5")));
+                            .arg(text, bg, hover));
 }
 
 bool ChatWidget::isDarkTheme() const

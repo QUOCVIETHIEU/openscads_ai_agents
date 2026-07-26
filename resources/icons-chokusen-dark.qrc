@@ -31,8 +31,20 @@
     <file>icons/chokusen-dark/svg/chokusen-floor.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-export-wrl.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-file.svg</file>
+    <file>icons/chokusen-dark/svg/chokusen-fold-collapsed.svg</file>
+    <file>icons/chokusen-dark/svg/chokusen-fold-expanded.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-folder.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-history.svg</file>
+    <file>icons/chokusen-dark/svg/explorer-branch-down.svg</file>
+    <file>icons/chokusen-dark/svg/explorer-branch-right.svg</file>
+    <file>icons/chokusen-dark/svg/explorer-file.svg</file>
+    <file>icons/chokusen-dark/svg/explorer-folder.svg</file>
+    <file>icons/chokusen-dark/svg/explorer-image.svg</file>
+    <file>icons/chokusen-dark/svg/explorer-json.svg</file>
+    <file>icons/chokusen-dark/svg/explorer-markdown.svg</file>
+    <file>icons/chokusen-dark/svg/explorer-mesh.svg</file>
+    <file>icons/chokusen-dark/svg/explorer-scad.svg</file>
+    <file>icons/chokusen-dark/svg/ico_code_toggle.svg</file>
     <file>icons/chokusen-dark/svg/ico_editor.svg</file>
     <file>icons/chokusen-dark/svg/ico_folder.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-indent.svg</file>

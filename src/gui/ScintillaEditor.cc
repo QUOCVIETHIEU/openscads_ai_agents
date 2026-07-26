@@ -5,6 +5,10 @@
 #include <QEvent>
 #include <QFrame>
 #include <QGuiApplication>
+#include <QIcon>
+#include <QImage>
+#include <QPainter>
+#include <QPixmap>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QKeyCombination>
 #endif
@@ -13,11 +17,10 @@
 #include <QChar>
 #include <QMenu>
 #include <QObject>
-#include <QPainter>
-#include <QPainterPath>
 #include <QPoint>
 #include <QRegularExpression>
 #include <QShortcut>
+#include <QSize>
 #include <QString>
 #include <QTimer>
 #include <QToolTip>
@@ -244,6 +247,25 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
 
   initMargin();
   applyEditorChrome(QColor(QStringLiteral("#ffffff")));
+
+  // QScintilla toggles the fold before emitting marginClicked. Re-collapse
+  // through Scintilla's text-aware API so a compact ellipsis is shown.
+  connect(qsci, &QsciScintilla::marginClicked, this,
+          [this](int margin, int line, Qt::KeyboardModifiers) {
+            if (margin != 4) return;
+            QTimer::singleShot(0, this, [this, line]() {
+              const bool expanded = qsci->SendScintilla(
+                QsciScintillaBase::SCI_GETFOLDEXPANDED, static_cast<unsigned long>(line));
+              if (expanded) return;
+
+              // Expand once, then collapse with display text. This replaces
+              // the old black fold rule with a subtle trailing ellipsis.
+              qsci->SendScintilla(QsciScintillaBase::SCI_TOGGLEFOLD,
+                                  static_cast<unsigned long>(line));
+              qsci->SendScintilla(QsciScintillaBase::SCI_TOGGLEFOLDSHOWTEXT,
+                                  static_cast<uintptr_t>(line), "  …");
+            });
+          });
 
   connect(qsci, &QsciScintilla::textChanged, this, &ScintillaEditor::contentsChanged);
   connect(qsci, &QsciScintilla::modificationChanged, this, &ScintillaEditor::fireModificationChanged);
@@ -702,7 +724,7 @@ void ScintillaEditor::applyEditorChrome(const QColor& paperColor)
   const bool dark = paperColor.lightness() < 128;
   const QColor divider = dark ? QColor(QStringLiteral("#3c3c3c")) : QColor(QStringLiteral("#e7e7e7"));
   const QColor guide = dark ? QColor(QStringLiteral("#404040")) : QColor(QStringLiteral("#d8d8d8"));
-  const QColor arrow = dark ? QColor(QStringLiteral("#c5c5c5")) : QColor(QStringLiteral("#747474"));
+  const QColor foldText = dark ? QColor(QStringLiteral("#969696")) : QColor(QStringLiteral("#8a8a8a"));
 
   // Scintilla expects colors packed as 0x00BBGGRR
   auto sciColor = [](const QColor& c) -> long {
@@ -721,39 +743,45 @@ void ScintillaEditor::applyEditorChrome(const QColor& paperColor)
                       static_cast<unsigned long>(QsciScintillaBase::STYLE_INDENTGUIDE),
                       sciColor(paperColor));
 
-  // Hide Scintilla's fold-display box. With an empty label it appears as an
-  // unattractive horizontal rule across the remainder of a collapsed line.
+  // Plain trailing text, never Scintilla's boxed style (which draws the
+  // unwanted black rule across a collapsed line).
   qsci->SendScintilla(QsciScintillaBase::SCI_FOLDDISPLAYTEXTSETSTYLE,
-                      static_cast<unsigned long>(QsciScintillaBase::SC_FOLDDISPLAYTEXT_HIDDEN));
+                      static_cast<unsigned long>(QsciScintillaBase::SC_FOLDDISPLAYTEXT_STANDARD));
+  qsci->SendScintilla(QsciScintillaBase::SCI_STYLESETFORE,
+                      static_cast<unsigned long>(QsciScintillaBase::STYLE_FOLDDISPLAYTEXT),
+                      sciColor(foldText));
+  qsci->SendScintilla(QsciScintillaBase::SCI_STYLESETBACK,
+                      static_cast<unsigned long>(QsciScintillaBase::STYLE_FOLDDISPLAYTEXT),
+                      sciColor(paperColor));
+  qsci->SendScintilla(QsciScintillaBase::SCI_STYLESETITALIC,
+                      static_cast<unsigned long>(QsciScintillaBase::STYLE_FOLDDISPLAYTEXT), 0L);
 
-  // Small outline chevrons like Cursor/VS Code. Built-in arrows scale to the
-  // full line height and become visually heavy when extra line spacing is on.
-  auto foldChevron = [&arrow](bool expanded) {
-    QPixmap pixmap(12, 12);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(arrow, 1.25, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    QPainterPath path;
-    if (expanded) {
-      path.moveTo(3.5, 4.5);
-      path.lineTo(6.0, 7.0);
-      path.lineTo(8.5, 4.5);
-    } else {
-      path.moveTo(4.5, 3.5);
-      path.lineTo(7.0, 6.0);
-      path.lineTo(4.5, 8.5);
+  // Remove Scintilla's default black rule drawn beneath a contracted fold line;
+  // the trailing ellipsis already signals the collapse.
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETFOLDFLAGS, 0L);
+
+  // Fold chevrons from theme SVGs. Scintilla pixmap markers ignore Qt DPR, so
+  // rasterize at a fixed logical size (dpr 1) — vector paint keeps edges clean.
+  auto foldPixmap = [](const QString& name) -> QPixmap {
+    constexpr int size = 12;
+    QImage img(size, size, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+    {
+      QPainter p(&img);
+      p.setRenderHint(QPainter::Antialiasing, true);
+      p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+      QIcon::fromTheme(name).paint(&p, QRect(0, 0, size, size));
     }
-    painter.drawPath(path);
-    return pixmap;
+    img.setDevicePixelRatio(1.0);
+    return QPixmap::fromImage(img);
   };
-
-  const QPixmap collapsed = foldChevron(false);
-  const QPixmap expanded = foldChevron(true);
+  const QPixmap collapsed = foldPixmap(QStringLiteral("chokusen-fold-collapsed"));
+  const QPixmap expanded = foldPixmap(QStringLiteral("chokusen-fold-expanded"));
   qsci->markerDefine(collapsed, QsciScintillaBase::SC_MARKNUM_FOLDER);
   qsci->markerDefine(collapsed, QsciScintillaBase::SC_MARKNUM_FOLDEREND);
   qsci->markerDefine(expanded, QsciScintillaBase::SC_MARKNUM_FOLDEROPEN);
   qsci->markerDefine(expanded, QsciScintillaBase::SC_MARKNUM_FOLDEROPENMID);
+  qsci->setMarginWidth(4, 14);
 
   // No tree branches/tails: indentation guides already communicate nesting.
   for (int marker : {QsciScintillaBase::SC_MARKNUM_FOLDERMIDTAIL,

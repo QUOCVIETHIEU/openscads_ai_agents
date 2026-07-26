@@ -108,7 +108,7 @@ ProjectExplorer::ProjectExplorer(QWidget *parent) : QWidget(parent)
   tree_->setModel(model_);
   tree_->setHeaderHidden(true);
   tree_->setAnimated(false);
-  tree_->setIndentation(14);
+  tree_->setIndentation(12);
   tree_->setIconSize(QSize(16, 16));
   tree_->setUniformRowHeights(true);
   tree_->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -141,6 +141,8 @@ void ProjectExplorer::refreshTheme()
     const QModelIndex rootIndex = model_->setRootPath(root);
     tree_->setRootIndex(rootIndex);
   }
+  const QString iconRoot =
+    dark ? QStringLiteral(":/icons/chokusen-dark/svg/") : QStringLiteral(":/icons/chokusen/svg/");
   setStyleSheet(QStringLiteral(R"(
     QWidget#projectExplorer {
       background: %1;
@@ -202,7 +204,23 @@ void ProjectExplorer::refreshTheme()
     }
     QTreeView#projectExplorerTree::item {
       min-height: 22px;
-      padding: 1px 4px;
+      height: 22px;
+      padding: 0px 4px;
+    }
+    QTreeView#projectExplorerTree::branch {
+      background: transparent;
+      border-image: none;
+      image: none;
+    }
+    QTreeView#projectExplorerTree::branch:has-children:!has-siblings:closed,
+    QTreeView#projectExplorerTree::branch:closed:has-children:has-siblings {
+      border-image: none;
+      image: url(%8);
+    }
+    QTreeView#projectExplorerTree::branch:open:has-children:!has-siblings,
+    QTreeView#projectExplorerTree::branch:open:has-children:has-siblings {
+      border-image: none;
+      image: url(%9);
     }
     QTreeView#projectExplorerTree::item:hover {
       background: %6;
@@ -218,7 +236,9 @@ void ProjectExplorer::refreshTheme()
                        dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333"),
                        dark ? QStringLiteral("#969696") : QStringLiteral("#6e6e6e"),
                        dark ? QStringLiteral("#2a2d2e") : QStringLiteral("#e8e8e8"),
-                       dark ? QStringLiteral("#094771") : QStringLiteral("#e8f1ff")));
+                       dark ? QStringLiteral("#094771") : QStringLiteral("#e8f1ff"),
+                       iconRoot + QStringLiteral("explorer-branch-right.svg"),
+                       iconRoot + QStringLiteral("explorer-branch-down.svg")));
 }
 
 void ProjectExplorer::setCollapsed(bool collapsed)

@@ -31,8 +31,20 @@
     <file>icons/chokusen/svg/chokusen-floor.svg</file>
     <file>icons/chokusen/svg/chokusen-export-wrl.svg</file>
     <file>icons/chokusen/svg/chokusen-file.svg</file>
+    <file>icons/chokusen/svg/chokusen-fold-collapsed.svg</file>
+    <file>icons/chokusen/svg/chokusen-fold-expanded.svg</file>
     <file>icons/chokusen/svg/chokusen-folder.svg</file>
     <file>icons/chokusen/svg/chokusen-history.svg</file>
+    <file>icons/chokusen/svg/explorer-branch-down.svg</file>
+    <file>icons/chokusen/svg/explorer-branch-right.svg</file>
+    <file>icons/chokusen/svg/explorer-file.svg</file>
+    <file>icons/chokusen/svg/explorer-folder.svg</file>
+    <file>icons/chokusen/svg/explorer-image.svg</file>
+    <file>icons/chokusen/svg/explorer-json.svg</file>
+    <file>icons/chokusen/svg/explorer-markdown.svg</file>
+    <file>icons/chokusen/svg/explorer-mesh.svg</file>
+    <file>icons/chokusen/svg/explorer-scad.svg</file>
+    <file>icons/chokusen/svg/ico_code_toggle.svg</file>
     <file>icons/chokusen/svg/ico_editor.svg</file>
     <file>icons/chokusen/svg/ico_folder.svg</file>
     <file>icons/chokusen/svg/chokusen-indent.svg</file>

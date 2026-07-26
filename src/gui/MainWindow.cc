@@ -36,8 +36,8 @@
 #include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QDropEvent>
-#include <QElapsedTimer>
-#include <QEvent>
+#include <QRegularExpression>
+#include <QRegularExpressionValidator>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
@@ -2242,6 +2242,8 @@ void MainWindow::actionReloadRenderPreview()
   autoReloadTimer->stop();
   setCurrentOutput();
 
+  // Opening/reloading a file should frame the model in the preview by default.
+  requestFitViewAfterRender();
   this->afterCompileSlot = "csgReloadRender";
   this->procevents = true;
   this->isPreview = true;
@@ -2294,6 +2296,8 @@ void MainWindow::actionRenderPreview()
   GuiLocker::lock();
   preview_requested = false;
 
+  // Default framing after every preview (F5, open-file auto-preview, AI tools).
+  requestFitViewAfterRender();
   resetMeasurementsState(false, "Render (not preview) to enable measurements");
 
   prepareCompile("csgRender", !animateDock->isVisible(), true);
@@ -3447,14 +3451,19 @@ void MainWindow::requestFitViewAfterRender()
   pendingFitViewAfterRender = true;
 }
 
+void MainWindow::fitViewToModel()
+{
+  pendingFitViewAfterRender = false;
+  if (!this->qglview || !this->qglview->getRenderer()) return;
+  this->qglview->viewAll();
+  this->qglview->update();
+  updateZoomPercentLabel();
+}
+
 void MainWindow::applyPendingFitView()
 {
   if (!pendingFitViewAfterRender) return;
-  pendingFitViewAfterRender = false;
-  if (!this->qglview || !this->qglview->getRenderer()) return;
-  // One-shot framing after Preview/Render — do not re-run on window resize.
-  this->qglview->viewAll();
-  this->qglview->update();
+  fitViewToModel();
 }
 
 void MainWindow::on_viewActionTop_triggered()
@@ -3557,6 +3566,7 @@ void MainWindow::on_viewActionViewAll_triggered()
 {
   this->qglview->viewAll();
   this->qglview->update();
+  updateZoomPercentLabel();
 }
 
 void MainWindow::on_viewActionPan_toggled(bool checked)
@@ -4760,11 +4770,21 @@ void MainWindow::setupZoomControls()
   zoomOutBtn->setFixedWidth(24);
   connect(zoomOutBtn, &QToolButton::clicked, this->viewActionZoomOut, &QAction::trigger);
 
-  this->zoomPercentLabel = new QLabel(QStringLiteral("100%"), this->zoomControlGroup);
-  this->zoomPercentLabel->setObjectName(QStringLiteral("zoomPercentLabel"));
-  this->zoomPercentLabel->setAlignment(Qt::AlignCenter);
-  this->zoomPercentLabel->setMinimumWidth(44);
-  this->zoomPercentLabel->setToolTip(_("Current zoom level (100% = default distance)"));
+  this->zoomPercentEdit = new QLineEdit(QStringLiteral("100%"), this->zoomControlGroup);
+  this->zoomPercentEdit->setObjectName(QStringLiteral("zoomPercentEdit"));
+  this->zoomPercentEdit->setAlignment(Qt::AlignCenter);
+  this->zoomPercentEdit->setFixedWidth(48);
+  this->zoomPercentEdit->setFixedHeight(18);
+  this->zoomPercentEdit->setFrame(false);
+  this->zoomPercentEdit->setToolTip(_("Type a zoom percent and press Enter"));
+  this->zoomPercentEdit->setValidator(new QRegularExpressionValidator(
+    QRegularExpression(QStringLiteral(R"(^\s*\d{1,4}\s*%?\s*$)")), this->zoomPercentEdit));
+  connect(this->zoomPercentEdit, &QLineEdit::editingFinished, this,
+          &MainWindow::applyZoomPercentFromEdit);
+  connect(this->zoomPercentEdit, &QLineEdit::returnPressed, this, [this]() {
+    applyZoomPercentFromEdit();
+    if (this->zoomPercentEdit) this->zoomPercentEdit->clearFocus();
+  });
 
   auto *zoomInBtn =
     makeZoomButton(QStringLiteral("+"), QStringLiteral("zoomInButton"), _("Zoom In"));
@@ -4778,26 +4798,23 @@ void MainWindow::setupZoomControls()
   sep->setFixedWidth(1);
   sep->setFixedHeight(14);
 
-  auto *zoom100Btn =
+  auto *zoomFitBtn =
     makeZoomButton(QString(), QStringLiteral("zoom100Button"),
-                   _("Reset zoom to 100% (keeps pan and rotation)"));
-  zoom100Btn->setIcon(QIcon::fromTheme(QStringLiteral("chokusen-zoom-100")));
-  zoom100Btn->setIconSize(QSize(14, 14));
-  zoom100Btn->setFixedWidth(24);
-  zoom100Btn->setToolButtonStyle(Qt::ToolButtonIconOnly);
+                   _("Fit model to preview"));
+  zoomFitBtn->setIcon(QIcon::fromTheme(QStringLiteral("chokusen-zoom-100")));
+  zoomFitBtn->setIconSize(QSize(14, 14));
+  zoomFitBtn->setFixedWidth(24);
+  zoomFitBtn->setToolButtonStyle(Qt::ToolButtonIconOnly);
 
   layout->addWidget(zoomOutBtn);
-  layout->addWidget(this->zoomPercentLabel);
+  layout->addWidget(this->zoomPercentEdit);
   layout->addWidget(zoomInBtn);
   layout->addWidget(sep, 0, Qt::AlignVCenter);
-  layout->addWidget(zoom100Btn);
+  layout->addWidget(zoomFitBtn);
 
   this->viewerToolBar->insertWidget(this->viewActionResetView, this->zoomControlGroup);
 
-  connect(zoom100Btn, &QToolButton::clicked, this, [this]() {
-    if (!this->qglview) return;
-    this->qglview->zoom(Camera::DEFAULT_VIEWER_DISTANCE, false);
-  });
+  connect(zoomFitBtn, &QToolButton::clicked, this->viewActionViewAll, &QAction::trigger);
 
   styleZoomControls();
   updateZoomPercentLabel();
@@ -4841,13 +4858,15 @@ void MainWindow::styleZoomControls()
     QWidget#zoomControlGroup QToolButton:pressed {
       background: %5;
     }
-    QLabel#zoomPercentLabel {
+    QLineEdit#zoomPercentEdit {
       background: transparent;
+      border: none;
       color: %3;
       font-size: 11px;
       font-weight: 600;
-      padding: 0px 2px;
-      min-width: 44px;
+      padding: 0px 1px;
+      margin: 0px;
+      selection-background-color: %4;
     }
     QFrame#zoomGroupDivider {
       background: %6;
@@ -4859,22 +4878,43 @@ void MainWindow::styleZoomControls()
                                           .arg(bg, border, text, hover, pressed, divider));
 }
 
+void MainWindow::applyZoomPercentFromEdit()
+{
+  if (!this->zoomPercentEdit || !this->qglview) return;
+
+  QString raw = this->zoomPercentEdit->text().trimmed();
+  raw.remove(QLatin1Char('%'));
+  raw = raw.trimmed();
+  bool ok = false;
+  const int percent = raw.toInt(&ok);
+  if (!ok || percent < 1 || percent > 9999) {
+    updateZoomPercentLabel();
+    return;
+  }
+
+  const double distance = Camera::DEFAULT_VIEWER_DISTANCE * 100.0 / static_cast<double>(percent);
+  this->qglview->zoom(qMax(0.01, distance), false);
+  updateZoomPercentLabel();
+}
+
 void MainWindow::updateZoomPercentLabel()
 {
-  if (!this->zoomPercentLabel || !this->qglview) return;
+  if (!this->zoomPercentEdit || !this->qglview) return;
+  // Don't fight the user while they are typing a new value.
+  if (this->zoomPercentEdit->hasFocus()) return;
 
   const double distance = this->qglview->cam.zoomValue();
   if (distance <= 0.0) {
-    this->zoomPercentLabel->setText(QStringLiteral("—"));
+    this->zoomPercentEdit->setText(QStringLiteral("—"));
     return;
   }
 
   const int percent =
     qRound(100.0 * Camera::DEFAULT_VIEWER_DISTANCE / distance);
   const int clamped = qBound(percent, 1, 9999);
-  this->zoomPercentLabel->setText(QStringLiteral("%1%").arg(clamped));
-  this->zoomPercentLabel->setToolTip(
-    QString(_("Current zoom: %1%% (distance %2)"))
+  this->zoomPercentEdit->setText(QStringLiteral("%1%").arg(clamped));
+  this->zoomPercentEdit->setToolTip(
+    QString(_("Current zoom: %1%% — type a value and press Enter (distance %2)"))
       .arg(clamped)
       .arg(QString::number(distance, 'f', 2)));
 }
