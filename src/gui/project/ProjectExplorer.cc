@@ -21,13 +21,15 @@
 #include <QVBoxLayout>
 #include <QHeaderView>
 #include <QDesktopServices>
+#include <QIcon>
 #include <QUrl>
+#include <QStyleFactory>
 
 namespace {
 
 // Cursor-style: every folder keeps an expand chevron, even when empty.
-// QFileSystemModel only reports hasChildren after it finds entries, so empty
-// dirs lose their branch arrow otherwise.
+// QFileSystemModel marks empty dirs with Qt::ItemNeverHasChildren after the
+// first fetch, which hides the branch arrow even if hasChildren() is true.
 class ProjectFileSystemModel : public QFileSystemModel
 {
 public:
@@ -37,6 +39,15 @@ public:
   {
     if (parent.isValid() && isDir(parent)) return true;
     return QFileSystemModel::hasChildren(parent);
+  }
+
+  Qt::ItemFlags flags(const QModelIndex& index) const override
+  {
+    Qt::ItemFlags f = QFileSystemModel::flags(index);
+    if (index.isValid() && isDir(index)) {
+      f &= ~Qt::ItemNeverHasChildren;
+    }
+    return f;
   }
 };
 
@@ -49,28 +60,28 @@ QString inputDialogStyle(bool dark)
       }
       QLabel {
         color: #cccccc;
-        font-size: 13px;
-        padding: 2px 0 8px 0;
+        font-size: 12px;
+        padding: 0 0 4px 0;
       }
       QLineEdit {
-        min-height: 36px;
-        padding: 8px 12px;
-        font-size: 13px;
+        min-height: 28px;
+        padding: 4px 8px;
+        font-size: 12px;
         color: #cccccc;
         background: #1e1e1e;
         border: 1px solid #3c3c3c;
-        border-radius: 6px;
+        border-radius: 4px;
         selection-background-color: #094771;
       }
       QLineEdit:focus {
         border: 1px solid #0078d4;
       }
       QPushButton {
-        min-width: 96px;
-        min-height: 32px;
-        padding: 6px 18px;
-        font-size: 13px;
-        border-radius: 6px;
+        min-width: 72px;
+        min-height: 26px;
+        padding: 4px 14px;
+        font-size: 12px;
+        border-radius: 4px;
         border: 1px solid #3c3c3c;
         background: #2d2d2d;
         color: #cccccc;
@@ -94,28 +105,28 @@ QString inputDialogStyle(bool dark)
     }
     QLabel {
       color: #333333;
-      font-size: 13px;
-      padding: 2px 0 8px 0;
+      font-size: 12px;
+      padding: 0 0 4px 0;
     }
     QLineEdit {
-      min-height: 36px;
-      padding: 8px 12px;
-      font-size: 13px;
+      min-height: 28px;
+      padding: 4px 8px;
+      font-size: 12px;
       color: #333333;
       background: #ffffff;
       border: 1px solid #d0d0d0;
-      border-radius: 6px;
+      border-radius: 4px;
       selection-background-color: #cce0ff;
     }
     QLineEdit:focus {
       border: 1px solid #0078d4;
     }
     QPushButton {
-      min-width: 96px;
-      min-height: 32px;
-      padding: 6px 18px;
-      font-size: 13px;
-      border-radius: 6px;
+      min-width: 72px;
+      min-height: 26px;
+      padding: 4px 14px;
+      font-size: 12px;
+      border-radius: 4px;
       border: 1px solid #d0d0d0;
       background: #f3f3f3;
       color: #333333;
@@ -145,8 +156,8 @@ QString promptText(QWidget *parent, const QString& title, const QString& label, 
   dlg.setOkButtonText(_("OK"));
   dlg.setCancelButtonText(_("Cancel"));
   dlg.setStyleSheet(inputDialogStyle(isDarkMode()));
-  dlg.setMinimumSize(480, 200);
-  dlg.resize(520, 220);
+  dlg.setMinimumSize(340, 140);
+  dlg.resize(380, 150);
   const int result = dlg.exec();
   if (ok) *ok = (result == QDialog::Accepted);
   return dlg.textValue();
@@ -161,8 +172,93 @@ int askYesNo(QWidget *parent, const QString& title, const QString& text)
   box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
   box.setDefaultButton(QMessageBox::No);
   box.setStyleSheet(inputDialogStyle(isDarkMode()));
-  box.setMinimumWidth(420);
+  box.setMinimumWidth(320);
   return box.exec();
+}
+
+QString explorerContextMenuStyle(bool dark)
+{
+  if (dark) {
+    return QStringLiteral(R"(
+      QMenu#projectExplorerMenu {
+        background: #252526;
+        border: 1px solid #3a3a3a;
+        border-radius: 6px;
+        padding: 4px;
+        min-width: 180px;
+      }
+      QMenu#projectExplorerMenu::item {
+        padding: 5px 14px 5px 8px;
+        margin: 0px 1px;
+        border-radius: 4px;
+        color: #cccccc;
+        font-size: 12px;
+        min-height: 20px;
+      }
+      QMenu#projectExplorerMenu::item:selected {
+        background: #094771;
+        color: #ffffff;
+      }
+      QMenu#projectExplorerMenu::item:disabled {
+        color: #6a6a6a;
+        background: transparent;
+      }
+      QMenu#projectExplorerMenu::icon {
+        padding-left: 2px;
+        width: 14px;
+        height: 14px;
+      }
+      QMenu#projectExplorerMenu::separator {
+        height: 1px;
+        background: #333333;
+        margin: 4px 8px;
+      }
+    )");
+  }
+  return QStringLiteral(R"(
+    QMenu#projectExplorerMenu {
+      background: #ffffff;
+      border: 1px solid #e6e6e6;
+      border-radius: 6px;
+      padding: 4px;
+      min-width: 180px;
+    }
+    QMenu#projectExplorerMenu::item {
+      padding: 5px 14px 5px 8px;
+      margin: 0px 1px;
+      border-radius: 4px;
+      color: #333333;
+      font-size: 12px;
+      min-height: 20px;
+    }
+    QMenu#projectExplorerMenu::item:selected {
+      background: #eef5ff;
+      color: #1a1a1a;
+    }
+    QMenu#projectExplorerMenu::item:disabled {
+      color: #a0a0a0;
+      background: transparent;
+    }
+    QMenu#projectExplorerMenu::icon {
+      padding-left: 2px;
+      width: 14px;
+      height: 14px;
+    }
+    QMenu#projectExplorerMenu::separator {
+      height: 1px;
+      background: #ededed;
+      margin: 4px 8px;
+    }
+  )");
+}
+
+QAction *addMenuAction(QMenu *menu, const QString& text, const QString& iconName)
+{
+  auto *action = menu->addAction(text);
+  if (!iconName.isEmpty()) {
+    action->setIcon(QIcon::fromTheme(iconName));
+  }
+  return action;
 }
 
 }  // namespace
@@ -255,8 +351,12 @@ ProjectExplorer::ProjectExplorer(QWidget *parent) : QWidget(parent)
   tree_->setIndentation(12);
   tree_->setIconSize(QSize(16, 16));
   tree_->setUniformRowHeights(true);
+  tree_->setRootIsDecorated(true);
+  tree_->setItemsExpandable(true);
+  tree_->setExpandsOnDoubleClick(false);
   tree_->setContextMenuPolicy(Qt::CustomContextMenu);
-  tree_->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
+  // Rename only via the context-menu dialog, never inline on the tree.
+  tree_->setEditTriggers(QAbstractItemView::NoEditTriggers);
   // Hide size/type/date columns
   for (int c = 1; c < model_->columnCount(); ++c) {
     tree_->hideColumn(c);
@@ -363,24 +463,18 @@ void ProjectExplorer::refreshTheme()
     QTreeView#projectExplorerTree::branch:selected:hover {
       background: transparent;
     }
-    QTreeView#projectExplorerTree::branch:has-children:!has-siblings:closed,
-    QTreeView#projectExplorerTree::branch:closed:has-children:has-siblings {
+    QTreeView#projectExplorerTree::branch:has-children:closed {
       border-image: none;
       image: url(%8);
     }
-    QTreeView#projectExplorerTree::branch:open:has-children:!has-siblings,
-    QTreeView#projectExplorerTree::branch:open:has-children:has-siblings {
+    QTreeView#projectExplorerTree::branch:has-children:open {
       border-image: none;
       image: url(%9);
     }
-    QTreeView#projectExplorerTree::branch:has-children:!has-siblings:closed:selected,
-    QTreeView#projectExplorerTree::branch:closed:has-children:has-siblings:selected,
-    QTreeView#projectExplorerTree::branch:open:has-children:!has-siblings:selected,
-    QTreeView#projectExplorerTree::branch:open:has-children:has-siblings:selected,
-    QTreeView#projectExplorerTree::branch:has-children:!has-siblings:closed:hover,
-    QTreeView#projectExplorerTree::branch:closed:has-children:has-siblings:hover,
-    QTreeView#projectExplorerTree::branch:open:has-children:!has-siblings:hover,
-    QTreeView#projectExplorerTree::branch:open:has-children:has-siblings:hover {
+    QTreeView#projectExplorerTree::branch:has-children:closed:selected,
+    QTreeView#projectExplorerTree::branch:has-children:open:selected,
+    QTreeView#projectExplorerTree::branch:has-children:closed:hover,
+    QTreeView#projectExplorerTree::branch:has-children:open:hover {
       background: transparent;
     }
     QTreeView#projectExplorerTree::item:hover {
@@ -474,6 +568,7 @@ void ProjectExplorer::onCustomContextMenu(const QPoint& pos)
   const QModelIndex index = tree_->indexAt(pos);
   QString targetDir = pm.rootPath();
   QString targetFile;
+  bool isScadFile = false;
   if (index.isValid()) {
     const QString path = absolutePathForIndex(index);
     QFileInfo info(path);
@@ -482,17 +577,39 @@ void ProjectExplorer::onCustomContextMenu(const QPoint& pos)
     } else {
       targetFile = path;
       targetDir = info.absolutePath();
+      isScadFile = info.suffix().compare(QLatin1String("scad"), Qt::CaseInsensitive) == 0;
     }
   }
 
   QMenu menu(this);
-  QAction *newFile = menu.addAction(_("New File…"));
-  QAction *newFolder = menu.addAction(_("New Folder…"));
+  menu.setObjectName(QStringLiteral("projectExplorerMenu"));
+  // Fusion avoids macOS native menu chrome stacking a second thick border
+  // on top of the stylesheet edge.
+  if (QStyle *fusion = QStyleFactory::create(QStringLiteral("Fusion"))) {
+    menu.setStyle(fusion);
+  }
+  menu.setWindowFlags(menu.windowFlags() | Qt::NoDropShadowWindowHint);
+  menu.setAttribute(Qt::WA_TranslucentBackground, false);
+  menu.setStyleSheet(explorerContextMenuStyle(isDarkMode()));
+
+  QAction *render = nullptr;
+  if (isScadFile) {
+    render = addMenuAction(&menu, _("Render"), QStringLiteral("chokusen-render"));
+    menu.addSeparator();
+  }
+
+  QAction *newFile =
+    addMenuAction(&menu, _("New File…"), QStringLiteral("chokusen-new"));
+  QAction *newFolder =
+    addMenuAction(&menu, _("New Folder…"), QStringLiteral("chokusen-folder"));
   menu.addSeparator();
-  QAction *rename = menu.addAction(_("Rename…"));
-  QAction *remove = menu.addAction(_("Delete…"));
+  QAction *rename =
+    addMenuAction(&menu, _("Rename…"), QStringLiteral("chokusen-file"));
+  QAction *remove =
+    addMenuAction(&menu, _("Delete…"), QStringLiteral("chokusen-recycle"));
   menu.addSeparator();
-  QAction *reveal = menu.addAction(_("Reveal in Finder"));
+  QAction *reveal =
+    addMenuAction(&menu, _("Reveal in Finder"), QStringLiteral("chokusen-open"));
 
   const bool protectedItem = index.isValid() && isProtectedPath(absolutePathForIndex(index));
   rename->setEnabled(index.isValid() && !protectedItem);
@@ -501,7 +618,9 @@ void ProjectExplorer::onCustomContextMenu(const QPoint& pos)
   QAction *chosen = menu.exec(tree_->viewport()->mapToGlobal(pos));
   if (!chosen) return;
 
-  if (chosen == newFile) {
+  if (render && chosen == render) {
+    emit renderFileRequested(targetFile);
+  } else if (chosen == newFile) {
     bool ok = false;
     const QString name =
       promptText(this, _("New File"), _("File name:"), QStringLiteral("untitled.scad"), &ok);

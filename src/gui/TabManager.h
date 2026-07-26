@@ -10,6 +10,9 @@
 #include "gui/Editor.h"
 
 class MainWindow;  // for circular dependency
+class QStackedWidget;
+class QTabWidget;
+class QWidget;
 
 class TabManager : public QObject
 {
@@ -18,11 +21,12 @@ class TabManager : public QObject
 public:
   TabManager(MainWindow *o, const QString& filename);
   QWidget *getTabContent();
-  EditorInterface *editor;
+  EditorInterface *editor = nullptr;
   QSet<EditorInterface *> editorList;
 
   void createTab(const QString& filename);
   void openTabFile(const QString& filename);
+  bool hasOpenEditors() const { return !editorList.isEmpty(); }
 
   // returns the name and tooltip of the tab for the given provided editor
   // if there is a path associated with an editor this is the filepath
@@ -65,7 +69,10 @@ signals:
 private:
   MainWindow *parent;
   QTabWidget *tabWidget;
+  QStackedWidget *contentStack_ = nullptr;
+  QWidget *emptyPage_ = nullptr;
 
+  void refreshEmptyState();
   bool maybeSave(int);
   bool save(EditorInterface *edt, const QString& path);
   void saveError(const QIODevice& file, const std::string& msg, const QString& filepath);

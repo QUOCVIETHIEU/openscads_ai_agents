@@ -31,6 +31,9 @@
 #include <QStyleFactory>
 #include <QToolButton>
 #include <QWidget>
+#include <QStackedWidget>
+#include <QLabel>
+#include <QVBoxLayout>
 #include <cassert>
 #include <cstddef>
 #include <exception>
@@ -279,10 +282,39 @@ TabManager::TabManager(MainWindow *o, const QString& filename)
   connect(parent->editActionZoomTextIn, &QAction::triggered, this, &TabManager::zoomIn);
   connect(parent->editActionZoomTextOut, &QAction::triggered, this, &TabManager::zoomOut);
 
-  createTab(filename);
+  emptyPage_ = new QWidget();
+  emptyPage_->setObjectName(QStringLiteral("editorEmptyPage"));
+  emptyPage_->setAttribute(Qt::WA_StyledBackground, true);
+  emptyPage_->setStyleSheet(QStringLiteral(
+    "QWidget#editorEmptyPage { background: %1; }")
+                              .arg(isDarkMode() ? QStringLiteral("#1e1e1e")
+                                                : QStringLiteral("#f8f8f8")));
+  auto *emptyLayout = new QVBoxLayout(emptyPage_);
+  emptyLayout->setContentsMargins(24, 24, 24, 24);
+  emptyLayout->addStretch(1);
+  auto *hint = new QLabel(_("No file open"), emptyPage_);
+  hint->setObjectName(QStringLiteral("editorEmptyHint"));
+  hint->setAlignment(Qt::AlignCenter);
+  hint->setStyleSheet(QStringLiteral("color: #8a8a8a; font-size: 13px;"));
+  emptyLayout->addWidget(hint, 0, Qt::AlignHCenter);
+  auto *sub = new QLabel(_("Open a .scad file from the Project explorer"), emptyPage_);
+  sub->setAlignment(Qt::AlignCenter);
+  sub->setStyleSheet(QStringLiteral("color: #a8a8a8; font-size: 12px;"));
+  emptyLayout->addWidget(sub, 0, Qt::AlignHCenter);
+  emptyLayout->addStretch(2);
 
-  // Disable the closing button for the first tabbar
-  setTabsCloseButtonVisibility(0, false);
+  contentStack_ = new QStackedWidget();
+  contentStack_->setObjectName(QStringLiteral("editorContentStack"));
+  contentStack_->addWidget(emptyPage_);
+  contentStack_->addWidget(tabWidget);
+
+  if (!filename.isEmpty()) {
+    createTab(filename);
+  } else {
+    editor = nullptr;
+    parent->activeEditor = nullptr;
+    refreshEmptyState();
+  }
 }
 
 void TabManager::applyTheme()
@@ -347,20 +379,32 @@ void TabManager::setTabsCloseButtonVisibility(int indice, bool isVisible)
 
 QWidget *TabManager::getTabContent()
 {
-  assert(tabWidget != nullptr);
-  return tabWidget;
+  assert(contentStack_ != nullptr);
+  return contentStack_;
+}
+
+void TabManager::refreshEmptyState()
+{
+  if (!contentStack_) return;
+  contentStack_->setCurrentWidget(editorList.isEmpty() ? emptyPage_ : static_cast<QWidget *>(tabWidget));
 }
 
 void TabManager::tabSwitched(int x)
 {
   assert(tabWidget != nullptr);
 
+  if (x < 0 || tabWidget->count() == 0) {
+    editor = nullptr;
+    emit currentEditorChanged(nullptr);
+    return;
+  }
+
   editor = (EditorInterface *)tabWidget->widget(x);
 
   auto numberOfOpenTabs = tabWidget->count();
-  // Hides all the closing button except the one on the currently focused editor
+  // Show close on the active tab (including when it's the only one).
   for (int idx = 0; idx < numberOfOpenTabs; ++idx) {
-    bool isVisible = idx == x && numberOfOpenTabs > 1;
+    bool isVisible = idx == x;
     setTabsCloseButtonVisibility(idx, isVisible);
   }
 
@@ -383,26 +427,32 @@ void TabManager::closeTabRequested(int x)
 
   delete closingEditor->parameterWidget;
   delete closingEditor;
+
+  if (editorList.isEmpty()) {
+    editor = nullptr;
+    parent->activeEditor = nullptr;
+    refreshEmptyState();
+    emit currentEditorChanged(nullptr);
+  }
 }
 
 void TabManager::closeCurrentTab()
 {
   assert(tabWidget != nullptr);
-
-  /* Close tab or close the current window if only one tab is open. */
-  if (tabWidget->count() > 1) this->closeTabRequested(tabWidget->currentIndex());
-  else parent->close();
+  if (tabWidget->count() > 0) this->closeTabRequested(tabWidget->currentIndex());
 }
 
 void TabManager::nextTab()
 {
   assert(tabWidget != nullptr);
+  if (tabWidget->count() <= 0) return;
   tabWidget->setCurrentIndex((tabWidget->currentIndex() + 1) % tabWidget->count());
 }
 
 void TabManager::prevTab()
 {
   assert(tabWidget != nullptr);
+  if (tabWidget->count() <= 0) return;
   tabWidget->setCurrentIndex((tabWidget->currentIndex() + tabWidget->count() - 1) % tabWidget->count());
 }
 
@@ -420,11 +470,12 @@ void TabManager::open(const QString& filename)
   for (auto edt : editorList) {
     if (filename == edt->filepath) {
       tabWidget->setCurrentWidget(edt);
+      refreshEmptyState();
       return;
     }
   }
 
-  if (editor->filepath.isEmpty() && !editor->isContentModified() &&
+  if (editor && editor->filepath.isEmpty() && !editor->isContentModified() &&
       !editor->parameterWidget->isModified()) {
     openTabFile(filename);
   } else {
@@ -505,6 +556,7 @@ void TabManager::createTab(const QString& filename)
   if (tabWidget->currentWidget() != editor) {
     tabWidget->setCurrentWidget(editor);
   }
+  refreshEmptyState();
   emit tabCountChanged(editorList.size());
 }
 
@@ -515,87 +567,87 @@ size_t TabManager::count()
 
 void TabManager::highlightError(int i)
 {
-  editor->highlightError(i);
+  if (editor) editor->highlightError(i);
 }
 
 void TabManager::unhighlightLastError()
 {
-  editor->unhighlightLastError();
+  if (editor) editor->unhighlightLastError();
 }
 
 void TabManager::undo()
 {
-  editor->undo();
+  if (editor) editor->undo();
 }
 
 void TabManager::redo()
 {
-  editor->redo();
+  if (editor) editor->redo();
 }
 
 void TabManager::cut()
 {
-  editor->cut();
+  if (editor) editor->cut();
 }
 
 void TabManager::copy()
 {
-  editor->copy();
+  if (editor) editor->copy();
 }
 
 void TabManager::paste()
 {
-  editor->paste();
+  if (editor) editor->paste();
 }
 
 void TabManager::indentSelection()
 {
-  editor->indentSelection();
+  if (editor) editor->indentSelection();
 }
 
 void TabManager::unindentSelection()
 {
-  editor->unindentSelection();
+  if (editor) editor->unindentSelection();
 }
 
 void TabManager::commentSelection()
 {
-  editor->commentSelection();
+  if (editor) editor->commentSelection();
 }
 
 void TabManager::uncommentSelection()
 {
-  editor->uncommentSelection();
+  if (editor) editor->uncommentSelection();
 }
 
 void TabManager::toggleBookmark()
 {
-  editor->toggleBookmark();
+  if (editor) editor->toggleBookmark();
 }
 
 void TabManager::nextBookmark()
 {
-  editor->nextBookmark();
+  if (editor) editor->nextBookmark();
 }
 
 void TabManager::prevBookmark()
 {
-  editor->prevBookmark();
+  if (editor) editor->prevBookmark();
 }
 
 void TabManager::jumpToNextError()
 {
-  editor->jumpToNextError();
+  if (editor) editor->jumpToNextError();
 }
 
 void TabManager::setFocus()
 {
-  editor->setFocus();
+  if (editor) editor->setFocus();
 }
 
 void TabManager::updateActionUndoState()
 {
-  parent->editActionUndo->setEnabled(editor->canUndo());
+  parent->editActionUndo->setEnabled(editor && editor->canUndo());
 }
 
 void TabManager::onHyperlinkIndicatorClicked(int val)
@@ -717,9 +769,8 @@ void TabManager::showTabHeaderContextMenu(const QPoint& pos)
   closeAllButThisAction->setText(_("Close All But This Tab"));
   connect(closeAllButThisAction, &QAction::triggered, this, &TabManager::closeAllButThisTab);
 
-  // Don't allow to close the last tab.
+  // Closing the last tab leaves Design empty (no auto-quit).
   if (tabWidget->count() <= 1) {
-    closeAction->setDisabled(true);
     closeAllButThisAction->setDisabled(true);
   }
 
@@ -749,6 +800,10 @@ void TabManager::stopAnimation()
 
 void TabManager::updateFindState()
 {
+  if (!editor) {
+    parent->hideFind();
+    return;
+  }
   if (editor->findState == TabManager::FIND_REPLACE_VISIBLE) parent->showFind(true);
   else if (editor->findState == TabManager::FIND_VISIBLE) parent->showFind(false);
   else parent->hideFind();
@@ -833,6 +888,7 @@ void TabManager::setEditorTabName(const QString& tabName, const QString& tabTool
 bool TabManager::refreshDocument()
 {
   bool file_opened = false;
+  if (!editor) return false;
   if (!editor->filepath.isEmpty()) {
     QFile file(editor->filepath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {

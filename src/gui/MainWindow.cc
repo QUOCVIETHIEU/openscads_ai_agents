@@ -344,17 +344,17 @@ MainWindow::MainWindow(const QStringList& filenames) : rubberBandManager(this)
   show();
   openRemainingFiles(filenames);
 
-  // Restore the last AI project when launching without explicit files.
+  // Restore the last AI project when launching without explicit files,
+  // but leave the Design editor empty (no file open, no auto-render).
   if (filenames.isEmpty() || (filenames.size() == 1 && filenames.first().isEmpty())) {
     const QStringList recent = ProjectManager::instance().recentProjects();
     if (!recent.isEmpty()) {
       QString err;
       if (ProjectManager::instance().openProject(recent.first(), &err)) {
-        const QString target = ProjectManager::instance().aiTargetFile();
-        if (!target.isEmpty() && tabManager) tabManager->open(target);
         updateRecentProjectActions();
       }
     }
+    showProjectView();
   }
 }
 
@@ -799,6 +799,11 @@ void MainWindow::updateRecentFiles(const QString& FileSavedOrOpened)
  */
 void MainWindow::compile(bool reload, bool forcedone)
 {
+  if (!activeEditor) {
+    compileDone(forcedone);
+    return;
+  }
+
   OpenSCAD::hardwarnings = GlobalPreferences::inst()->getValue("advanced/enableHardwarnings").toBool();
   OpenSCAD::traceDepth = GlobalPreferences::inst()->getValue("advanced/traceDepth").toUInt();
   OpenSCAD::traceUsermoduleParameters =
@@ -1432,9 +1437,8 @@ void MainWindow::on_fileActionNewProject_triggered()
     QMessageBox::warning(this, _("New Project"), err.isEmpty() ? _("Failed to create project.") : err);
     return;
   }
-  const QString mainScad = ProjectManager::instance().aiTargetFile();
-  if (!mainScad.isEmpty()) tabManager->open(mainScad);
   updateRecentProjectActions();
+  showProjectView();
 }
 
 void MainWindow::on_fileActionOpenProject_triggered()
@@ -1447,9 +1451,8 @@ void MainWindow::on_fileActionOpenProject_triggered()
     QMessageBox::warning(this, _("Open Project"), err.isEmpty() ? _("Failed to open project.") : err);
     return;
   }
-  const QString target = ProjectManager::instance().aiTargetFile();
-  if (!target.isEmpty()) tabManager->open(target);
   updateRecentProjectActions();
+  showProjectView();
 }
 
 void MainWindow::on_fileActionClearRecentProjects_triggered()
@@ -1470,9 +1473,8 @@ void MainWindow::actionOpenRecentProject()
     updateRecentProjectActions();
     return;
   }
-  const QString target = ProjectManager::instance().aiTargetFile();
-  if (!target.isEmpty()) tabManager->open(target);
   updateRecentProjectActions();
+  showProjectView();
 }
 
 void MainWindow::updateRecentProjectActions()
@@ -1507,6 +1509,15 @@ void MainWindow::onProjectExplorerOpenFile(const QString& path)
   tabManager->open(path);
   ProjectManager::instance().setActiveFile(path);
   showEditorView();
+}
+
+void MainWindow::onProjectExplorerRenderFile(const QString& path)
+{
+  onProjectExplorerOpenFile(path);
+  // Wait a tick so the opened editor is active before starting F6 render.
+  QTimer::singleShot(0, this, [this]() {
+    if (this->designActionRender) this->designActionRender->trigger();
+  });
 }
 
 void MainWindow::showProjectView()
@@ -2071,18 +2082,18 @@ void MainWindow::setRenderVariables(ContextHandle<BuiltinContext>& context)
  */
 bool MainWindow::fileChangedOnDisk()
 {
-  if (!activeEditor->filepath.isEmpty()) {
-    struct stat st;
-    memset(&st, 0, sizeof(struct stat));
-    const bool valid = (stat(activeEditor->filepath.toLocal8Bit(), &st) == 0);
-    // If file isn't there, just return and use current editor text
-    if (!valid) return false;
+  if (!activeEditor || activeEditor->filepath.isEmpty()) return false;
 
-    auto newid = str(boost::format("%x.%x") % st.st_mtime % st.st_size);
-    if (newid != activeEditor->autoReloadId) {
-      activeEditor->autoReloadId = newid;
-      return true;
-    }
+  struct stat st;
+  memset(&st, 0, sizeof(struct stat));
+  const bool valid = (stat(activeEditor->filepath.toLocal8Bit(), &st) == 0);
+  // If file isn't there, just return and use current editor text
+  if (!valid) return false;
+
+  auto newid = str(boost::format("%x.%x") % st.st_mtime % st.st_size);
+  if (newid != activeEditor->autoReloadId) {
+    activeEditor->autoReloadId = newid;
+    return true;
   }
   return false;
 }
@@ -2215,7 +2226,7 @@ void MainWindow::parseTopLevelDocument()
 
 void MainWindow::checkAutoReload()
 {
-  if (!activeEditor->filepath.isEmpty()) {
+  if (activeEditor && !activeEditor->filepath.isEmpty()) {
     actionReloadRenderPreview();
   }
 }
@@ -2233,7 +2244,7 @@ void MainWindow::on_designActionAutoReload_toggled(bool on)
 
 bool MainWindow::checkEditorModified()
 {
-  if (activeEditor->isContentModified()) {
+  if (activeEditor && activeEditor->isContentModified()) {
     auto ret = QMessageBox::warning(this, _("Application"),
                                     _("The document has been modified.\n"
                                       "Do you really want to reload the file?"),
@@ -3445,6 +3456,7 @@ void MainWindow::on_viewActionShowScaleProportional_toggled(bool checked)
 
 bool MainWindow::isEmpty()
 {
+  if (!activeEditor) return true;
   return activeEditor->toPlainText().isEmpty();
 }
 
@@ -3574,8 +3586,12 @@ void MainWindow::viewTogglePerspective()
 
 void MainWindow::on_viewActionResetView_triggered()
 {
+  // Reset camera defaults, then fit the model into the preview frame
+  // (same framing as View All / the zoom 1:1 control).
   this->qglview->resetView();
+  this->qglview->viewAll();
   this->qglview->update();
+  updateZoomPercentLabel();
 }
 
 void MainWindow::on_viewActionViewAll_triggered()
@@ -3637,11 +3653,12 @@ void MainWindow::onEditorDockVisibilityChanged(bool isVisible)
     return;
   }
 
-  auto e = (ScintillaEditor *)this->activeEditor;
-  e->qsci->setReadOnly(false);
-  e->setupAutoComplete(false);
+  if (auto *e = qobject_cast<ScintillaEditor *>(this->activeEditor)) {
+    e->qsci->setReadOnly(false);
+    e->setupAutoComplete(false);
+  }
   editorDock->raise();
-  tabManager->setFocus();
+  if (tabManager) tabManager->setFocus();
   updateExportActions();
 }
 
@@ -3903,7 +3920,22 @@ void MainWindow::onTabManagerEditorChanged(EditorInterface *newEditor)
 {
   activeEditor = newEditor;
 
-  if (newEditor == nullptr) return;
+  if (newEditor == nullptr) {
+    refreshWindowTitle();
+    // No open file: keep Design empty and clear any leftover preview/render.
+    if (this->qglview) {
+      this->qglview->setRenderer(nullptr);
+      this->qglview->update();
+    }
+#ifdef ENABLE_OPENCSG
+    this->previewRenderer = nullptr;
+#endif
+    this->thrownTogetherRenderer = nullptr;
+    this->rootNode.reset();
+    this->rootGeom.reset();
+    this->renderedEditor = nullptr;
+    return;
+  }
 
   parameterDock->setWidget(newEditor->parameterWidget);
   editActionUndo->setEnabled(newEditor->canUndo());
@@ -3923,9 +3955,10 @@ void MainWindow::onTabManagerEditorChanged(EditorInterface *newEditor)
     ProjectManager::instance().setActiveFile(newEditor->filepath);
   }
 
-  // If there is no renderedEditor we request for a new preview if the
-  // auto-reload is enabled.
-  if (renderedEditor == nullptr && designActionAutoReload->isChecked() && !MainWindow::isEmpty()) {
+  // Never auto-preview/render just because a tab became active with empty content.
+  // Preview only when auto-reload is on and the editor already has content.
+  if (renderedEditor == nullptr && designActionAutoReload->isChecked() && !MainWindow::isEmpty() &&
+      !newEditor->filepath.isEmpty()) {
     actionRenderPreview();
   }
 }
@@ -4068,7 +4101,7 @@ void MainWindow::setFont(const QString& family, uint size)
   else font.setFixedPitch(true);
   if (size > 0) font.setPointSize(size);
   font.setStyleHint(QFont::TypeWriter);
-  activeEditor->setFont(font);
+  if (activeEditor) activeEditor->setFont(font);
 }
 
 void MainWindow::consoleOutput(const Message& msgObj, void *userdata)
@@ -4532,7 +4565,12 @@ void MainWindow::setupEditor(const QStringList& filenames)
 
   connect(this->projectViewTabBtn, &QToolButton::clicked, this, &MainWindow::onProjectActivityClicked);
   connect(this->editorViewTabBtn, &QToolButton::clicked, this, &MainWindow::onEditorActivityClicked);
-  showEditorView();
+  // Prefer Project explorer on launch; Editor stays empty until a file is opened.
+  if (ProjectManager::instance().hasProject()) {
+    showProjectView();
+  } else {
+    showEditorView();
+  }
 
   connect(this->projectExplorer, &ProjectExplorer::requestNewProject, this,
           &MainWindow::on_fileActionNewProject_triggered);
@@ -4540,6 +4578,8 @@ void MainWindow::setupEditor(const QStringList& filenames)
           &MainWindow::on_fileActionOpenProject_triggered);
   connect(this->projectExplorer, &ProjectExplorer::openFileRequested, this,
           &MainWindow::onProjectExplorerOpenFile);
+  connect(this->projectExplorer, &ProjectExplorer::renderFileRequested, this,
+          &MainWindow::onProjectExplorerRenderFile);
   connect(&ProjectManager::instance(), &ProjectManager::projectChanged, this,
           &MainWindow::onProjectManagerChanged);
 
@@ -4761,12 +4801,14 @@ void MainWindow::setupZoomControls()
   this->zoomControlGroup = new QWidget(this->viewerToolBar);
   this->zoomControlGroup->setObjectName(QStringLiteral("zoomControlGroup"));
   this->zoomControlGroup->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+  this->zoomControlGroup->setFixedHeight(22);
 
   auto *layout = new QHBoxLayout(this->zoomControlGroup);
   // Keep hover fills inset from the rounded outer border. Qt stylesheets do
   // not clip child backgrounds to a parent's border radius.
-  layout->setContentsMargins(4, 2, 4, 2);
+  layout->setContentsMargins(3, 0, 3, 0);
   layout->setSpacing(0);
+  layout->setAlignment(Qt::AlignVCenter);
 
   auto makeZoomButton = [this](const QString& text, const QString& objectName,
                                const QString& tip) {
@@ -4777,21 +4819,22 @@ void MainWindow::setupZoomControls()
     btn->setAutoRaise(true);
     btn->setFocusPolicy(Qt::NoFocus);
     btn->setCursor(Qt::PointingHandCursor);
-    btn->setFixedHeight(20);
+    btn->setFixedSize(20, 16);
+    btn->setToolButtonStyle(text.isEmpty() ? Qt::ToolButtonIconOnly
+                                           : Qt::ToolButtonTextOnly);
     return btn;
   };
 
   auto *zoomOutBtn =
     makeZoomButton(QStringLiteral("−"), QStringLiteral("zoomOutButton"), _("Zoom Out"));
-  zoomOutBtn->setFixedWidth(24);
   connect(zoomOutBtn, &QToolButton::clicked, this->viewActionZoomOut, &QAction::trigger);
 
   this->zoomPercentEdit = new QLineEdit(QStringLiteral("100%"), this->zoomControlGroup);
   this->zoomPercentEdit->setObjectName(QStringLiteral("zoomPercentEdit"));
   this->zoomPercentEdit->setAlignment(Qt::AlignCenter);
-  this->zoomPercentEdit->setFixedWidth(48);
-  this->zoomPercentEdit->setFixedHeight(20);
+  this->zoomPercentEdit->setFixedSize(40, 16);
   this->zoomPercentEdit->setFrame(false);
+  this->zoomPercentEdit->setAttribute(Qt::WA_MacShowFocusRect, false);
   this->zoomPercentEdit->setToolTip(_("Type a zoom percent and press Enter"));
   this->zoomPercentEdit->setValidator(new QRegularExpressionValidator(
     QRegularExpression(QStringLiteral(R"(^\s*\d{1,4}\s*%?\s*$)")), this->zoomPercentEdit));
@@ -4804,23 +4847,19 @@ void MainWindow::setupZoomControls()
 
   auto *zoomInBtn =
     makeZoomButton(QStringLiteral("+"), QStringLiteral("zoomInButton"), _("Zoom In"));
-  zoomInBtn->setFixedWidth(24);
   connect(zoomInBtn, &QToolButton::clicked, this->viewActionZoomIn, &QAction::trigger);
 
   auto *sep = new QFrame(this->zoomControlGroup);
   sep->setObjectName(QStringLiteral("zoomGroupDivider"));
   sep->setFrameShape(QFrame::VLine);
   sep->setFrameShadow(QFrame::Plain);
-  sep->setFixedWidth(1);
-  sep->setFixedHeight(14);
+  sep->setFixedSize(1, 10);
 
   auto *zoomFitBtn =
     makeZoomButton(QString(), QStringLiteral("zoom100Button"),
                    _("Fit model to preview"));
   zoomFitBtn->setIcon(QIcon::fromTheme(QStringLiteral("chokusen-zoom-100")));
-  zoomFitBtn->setIconSize(QSize(14, 14));
-  zoomFitBtn->setFixedWidth(24);
-  zoomFitBtn->setToolButtonStyle(Qt::ToolButtonIconOnly);
+  zoomFitBtn->setIconSize(QSize(12, 12));
 
   layout->addWidget(zoomOutBtn, 0, Qt::AlignVCenter);
   layout->addWidget(this->zoomPercentEdit, 0, Qt::AlignVCenter);
@@ -4852,21 +4891,18 @@ void MainWindow::styleZoomControls()
     QWidget#zoomControlGroup {
       background: %1;
       border: 1px solid %2;
-      border-radius: 7px;
+      border-radius: 6px;
       margin: 0px 2px;
     }
     QWidget#zoomControlGroup QToolButton {
       background: transparent;
       border: none;
-      border-radius: 4px;
+      border-radius: 3px;
       color: %3;
-      font-size: 13px;
+      font-size: 11px;
       font-weight: 600;
-      padding: 0px 4px;
-      margin: 0px;
-    }
-    QWidget#zoomControlGroup QToolButton#zoom100Button {
       padding: 0px;
+      margin: 0px;
     }
     QWidget#zoomControlGroup QToolButton:hover {
       background: %4;
@@ -4878,9 +4914,9 @@ void MainWindow::styleZoomControls()
       background: transparent;
       border: none;
       color: %3;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
-      padding: 0px 1px;
+      padding: 0px;
       margin: 0px;
       selection-background-color: %4;
     }
@@ -4888,7 +4924,7 @@ void MainWindow::styleZoomControls()
       background: %6;
       border: none;
       max-width: 1px;
-      margin: 0px 2px;
+      margin: 0px 1px;
     }
   )")
                                           .arg(bg, border, text, hover, pressed, divider));
@@ -5710,7 +5746,9 @@ void MainWindow::restoreWindowState()
     const int winW = std::max(1000, this->width());
     const int editorW = std::max(320, (5 * winW) / 11);
     const int aiW = std::max(280, winW / 4);
-    activeEditor->setInitialSizeHint(QSize(editorW, 100));
+    if (activeEditor) {
+      activeEditor->setInitialSizeHint(QSize(editorW, 100));
+    }
     resizeDocks({editorDock}, {editorW}, Qt::Horizontal);
     if (this->aiDock) {
       resizeDocks({this->aiDock}, {aiW}, Qt::Horizontal);
@@ -5780,7 +5818,7 @@ void MainWindow::openRemainingFiles(const QStringList& filenames)
 {
   for (int i = 1; i < filenames.size(); ++i) tabManager->createTab(filenames[i]);
 
-  activeEditor->setFocus();
+  if (activeEditor) activeEditor->setFocus();
 }
 
 void MainWindow::changeEvent(QEvent *event)

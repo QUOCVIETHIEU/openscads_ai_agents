@@ -176,9 +176,9 @@
          <addaction name="viewActionOrthogonal"/>
          <addaction name="separator"/>
          <addaction name="viewActionShowAxes"/>
-         <addaction name="viewActionShowFloor"/>
          <addaction name="viewActionShowScaleProportional"/>
          <addaction name="viewActionShowEdges"/>
+         <addaction name="viewActionShowFloor"/>
         </widget>
        </item>
        <item>
@@ -1540,6 +1540,9 @@
    </property>
    <property name="text">
     <string>Reset &amp;View</string>
+   </property>
+   <property name="toolTip">
+    <string>Reset camera and fit model to preview</string>
    </property>
   </action>
   <action name="fileActionExportSVG">

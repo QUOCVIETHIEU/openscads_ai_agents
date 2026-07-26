@@ -1,12 +1,12 @@
 {
     "name" : "For Light Background",
     "index" : 1000,
-    "paper" : "#ffffff",
+    "paper" : "#f8f8f8",
     "text" : "#1f1f1f",
     "caret" : {
         "width" : 2,
         "foreground" : "#000000",
-        "line-background" : "#f5f5f5"
+        "line-background" : "#efefef"
     },
     "colors" : {
         "keyword1" : "#0000ff",
@@ -32,7 +32,7 @@
         "whitespace-foreground" : "#c8c8c8",
         "selection-foreground" : "#1f1f1f",
         "selection-background" : "#add6ff",
-        "margin-background" : "#ffffff",
+        "margin-background" : "#f8f8f8",
         "margin-foreground" : "#237893",
         "matched-brace-background" : "#e7e7e7",
         "matched-brace-foreground" : "#0431fa",

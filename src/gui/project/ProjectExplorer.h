@@ -26,6 +26,7 @@ signals:
   void requestNewProject();
   void requestOpenProject();
   void openFileRequested(const QString& absolutePath);
+  void renderFileRequested(const QString& absolutePath);
   void collapsedChanged(bool collapsed);
 
 public slots:

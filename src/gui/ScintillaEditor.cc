@@ -519,10 +519,12 @@ void ScintillaEditor::setColormap(const EditorColorScheme *colorScheme)
     auto font = this->lexer->font(this->lexer->defaultStyle());
     const QColor textColor(pt.get<std::string>("text").c_str());
     QColor paperColor(pt.get<std::string>("paper").c_str());
-    // Keep legacy dark papers aligned with the VS Code workbench surface
+    // Align editor paper with AI chat / workbench surface (#f8f8f8 / #1e1e1e).
     const QString paperHex = paperColor.name(QColor::HexRgb).toLower();
     if (paperHex == QLatin1String("#222222") || paperHex == QLatin1String("#272822")) {
       paperColor = QColor(QStringLiteral("#1e1e1e"));
+    } else if (paperHex == QLatin1String("#ffffff")) {
+      paperColor = QColor(QStringLiteral("#f8f8f8"));
     }
 
 #if ENABLE_LEXERTL
@@ -701,10 +703,13 @@ void ScintillaEditor::setColormap(const EditorColorScheme *colorScheme)
       readColor(colors, "hyperlink-indicator-hover", QColor(139, 24, 168, 100)),
       hyperlinkIndicatorNumber);  // violet
     qsci->setWhitespaceForegroundColor(readColor(colors, "whitespace-foreground", textColor));
-    qsci->setMarginsBackgroundColor(readColor(colors, "margin-background", paperColor));
+    QColor marginBg = readColor(colors, "margin-background", paperColor);
+    if (marginBg.name(QColor::HexRgb).toLower() == QLatin1String("#ffffff")) {
+      marginBg = paperColor;
+    }
+    qsci->setMarginsBackgroundColor(marginBg);
     qsci->setMarginsForegroundColor(readColor(colors, "margin-foreground", textColor));
-    qsci->setFoldMarginColors(readColor(colors, "margin-background", paperColor),
-                              readColor(colors, "margin-background", paperColor));
+    qsci->setFoldMarginColors(marginBg, marginBg);
     qsci->setMatchedBraceBackgroundColor(readColor(colors, "matched-brace-background", paperColor));
     qsci->setMatchedBraceForegroundColor(readColor(colors, "matched-brace-foreground", textColor));
     qsci->setUnmatchedBraceBackgroundColor(readColor(colors, "unmatched-brace-background", paperColor));

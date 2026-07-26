@@ -315,6 +315,7 @@ private slots:
   void actionOpenRecentProject();
   void updateRecentProjectActions();
   void onProjectExplorerOpenFile(const QString& path);
+  void onProjectExplorerRenderFile(const QString& path);
   void onProjectManagerChanged();
   void on_fileActionSave_triggered();
   void on_fileActionSaveAs_triggered();
