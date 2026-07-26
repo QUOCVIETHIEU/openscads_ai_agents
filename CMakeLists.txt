@@ -1353,6 +1353,8 @@ set(GUI_SOURCES
   src/gui/UIUtils.cc
   src/gui/WindowManager.cc
   src/gui/IgnoreWheelWhenNotFocused.cc
+  src/gui/project/ProjectManager.cc
+  src/gui/project/ProjectExplorer.cc
   src/gui/input/AxisConfigWidget.cc
   src/gui/input/ButtonConfigWidget.cc
   src/gui/input/MouseConfigWidget.cc
@@ -1451,6 +1453,8 @@ set(GUI_HEADERS
     src/gui/ai/ChatInputEdit.h
     src/gui/ai/AISettingsPanel.h
     src/gui/ai/AIApiKeyDialog.h
+    src/gui/project/ProjectManager.h
+    src/gui/project/ProjectExplorer.h
 )
 
 # To be added in Source for QtCreator to show them in project tree

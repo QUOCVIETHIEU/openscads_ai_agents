@@ -33,6 +33,7 @@
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QDropEvent>
 #include <QElapsedTimer>
@@ -45,6 +46,7 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QInputDialog>
 #include <QKeySequence>
 #include <QLabel>
 #include <QList>
@@ -82,6 +84,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QSizePolicy>
 #include <QByteArray>
@@ -139,6 +142,8 @@
 #include "gui/Console.h"
 #include "gui/ai/AIDock.h"
 #include "gui/ai/ChatWidget.h"
+#include "gui/project/ProjectManager.h"
+#include "gui/project/ProjectExplorer.h"
 #include "gui/Editor.h"
 #include "gui/Export3mfDialog.h"
 #include "gui/ExportPdfDialog.h"
@@ -266,6 +271,60 @@ void removeExportActions(QToolBar *toolbar, QAction *action)
   }
 }
 
+constexpr int kEditorActivityBarW = 32;
+constexpr int kWorkbenchHeaderH = 32;
+
+QIcon paintActivityIcon(const QColor& color, const std::function<void(QPainter&, int)>& paint)
+{
+  QIcon icon;
+  for (qreal dpr : {1.0, 2.0, 3.0}) {
+    const int logical = 16;
+    const int px = qMax(1, qRound(logical * dpr));
+    QPixmap pm(px, px);
+    pm.fill(Qt::transparent);
+    pm.setDevicePixelRatio(dpr);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(color, 1.15, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setBrush(Qt::NoBrush);
+    paint(p, logical);
+    p.end();
+    icon.addPixmap(pm);
+  }
+  return icon;
+}
+
+QIcon projectActivityIcon(bool dark)
+{
+  const QColor c = dark ? QColor("#c5c5c5") : QColor("#424242");
+  return paintActivityIcon(c, [](QPainter& p, int s) {
+    // Compact folder outline (matches editor stroke weight)
+    const QRectF body(s * 0.16, s * 0.36, s * 0.68, s * 0.46);
+    p.drawRoundedRect(body, 1.2, 1.2);
+    QPainterPath tab;
+    tab.moveTo(s * 0.16, s * 0.40);
+    tab.lineTo(s * 0.16, s * 0.28);
+    tab.lineTo(s * 0.40, s * 0.28);
+    tab.lineTo(s * 0.48, s * 0.36);
+    p.drawPath(tab);
+  });
+}
+
+QIcon editorActivityIcon(bool dark)
+{
+  const QColor c = dark ? QColor("#c5c5c5") : QColor("#424242");
+  return paintActivityIcon(c, [](QPainter& p, int s) {
+    // Compact code-file outline — same stroke language as folder
+    const QRectF page(s * 0.26, s * 0.14, s * 0.48, s * 0.72);
+    p.drawRoundedRect(page, 1.2, 1.2);
+    p.drawLine(QPointF(s * 0.50, s * 0.14), QPointF(s * 0.74, s * 0.38));
+    p.drawLine(QPointF(s * 0.50, s * 0.14), QPointF(s * 0.50, s * 0.38));
+    p.drawLine(QPointF(s * 0.50, s * 0.38), QPointF(s * 0.74, s * 0.38));
+    p.drawLine(QPointF(s * 0.36, s * 0.54), QPointF(s * 0.64, s * 0.54));
+    p.drawLine(QPointF(s * 0.36, s * 0.66), QPointF(s * 0.58, s * 0.66));
+  });
+}
+
 std::unique_ptr<ExternalToolInterface> createExternalToolService(print_service_t serviceType,
                                                                  const QString& serviceName,
                                                                  FileFormat fileFormat)
@@ -325,6 +384,19 @@ MainWindow::MainWindow(const QStringList& filenames) : rubberBandManager(this)
   this->hideFind();
   show();
   openRemainingFiles(filenames);
+
+  // Restore the last AI project when launching without explicit files.
+  if (filenames.isEmpty() || (filenames.size() == 1 && filenames.first().isEmpty())) {
+    const QStringList recent = ProjectManager::instance().recentProjects();
+    if (!recent.isEmpty()) {
+      QString err;
+      if (ProjectManager::instance().openProject(recent.first(), &err)) {
+        const QString target = ProjectManager::instance().aiTargetFile();
+        if (!target.isEmpty() && tabManager) tabManager->open(target);
+        updateRecentProjectActions();
+      }
+    }
+  }
 }
 
 void MainWindow::setAllMouseViewActions()
@@ -1350,6 +1422,225 @@ void MainWindow::on_fileActionClearRecent_triggered()
   settings.setValue("recentFileList", files);
 
   updateRecentFileActions();
+}
+
+void MainWindow::on_fileActionNewProject_triggered()
+{
+  const QString parentDir = QFileDialog::getExistingDirectory(
+    this, _("Choose parent folder for the new project"), QDir::homePath());
+  if (parentDir.isEmpty()) return;
+
+  QDialog dlg(this);
+  dlg.setWindowTitle(_("New Project"));
+  dlg.setModal(true);
+  dlg.setMinimumWidth(360);
+  auto *root = new QVBoxLayout(&dlg);
+  root->setContentsMargins(20, 18, 20, 16);
+  root->setSpacing(12);
+
+  auto *nameLabel = new QLabel(_("Project name"), &dlg);
+  auto *nameEdit = new QLineEdit(QStringLiteral("MyDesign"), &dlg);
+  nameEdit->setMinimumHeight(28);
+  nameEdit->selectAll();
+  root->addWidget(nameLabel);
+  root->addWidget(nameEdit);
+
+  auto *hint = new QLabel(
+    tr("Folder: %1").arg(QDir::toNativeSeparators(parentDir)), &dlg);
+  hint->setWordWrap(true);
+  hint->setStyleSheet(QStringLiteral("color: #6e6e6e; font-size: 11px;"));
+  root->addWidget(hint);
+
+  root->addSpacing(4);
+
+  auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+  buttons->button(QDialogButtonBox::Ok)->setText(_("OK"));
+  buttons->button(QDialogButtonBox::Cancel)->setText(_("Cancel"));
+  root->addWidget(buttons);
+
+  connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  connect(nameEdit, &QLineEdit::returnPressed, &dlg, &QDialog::accept);
+  nameEdit->setFocus();
+
+  if (dlg.exec() != QDialog::Accepted) return;
+  const QString safeName = nameEdit->text().trimmed();
+  if (safeName.isEmpty()) return;
+  const QString projectRoot = QDir(parentDir).filePath(safeName);
+
+  QString err;
+  if (!ProjectManager::instance().createProject(projectRoot, safeName, &err)) {
+    QMessageBox::warning(this, _("New Project"), err.isEmpty() ? _("Failed to create project.") : err);
+    return;
+  }
+  const QString mainScad = ProjectManager::instance().aiTargetFile();
+  if (!mainScad.isEmpty()) tabManager->open(mainScad);
+  updateRecentProjectActions();
+}
+
+void MainWindow::on_fileActionOpenProject_triggered()
+{
+  const QString root =
+    QFileDialog::getExistingDirectory(this, _("Open Project Folder"), QDir::homePath());
+  if (root.isEmpty()) return;
+  QString err;
+  if (!ProjectManager::instance().openProject(root, &err)) {
+    QMessageBox::warning(this, _("Open Project"), err.isEmpty() ? _("Failed to open project.") : err);
+    return;
+  }
+  const QString target = ProjectManager::instance().aiTargetFile();
+  if (!target.isEmpty()) tabManager->open(target);
+  updateRecentProjectActions();
+}
+
+void MainWindow::on_fileActionClearRecentProjects_triggered()
+{
+  ProjectManager::instance().clearRecentProjects();
+  updateRecentProjectActions();
+}
+
+void MainWindow::actionOpenRecentProject()
+{
+  const auto *action = qobject_cast<QAction *>(sender());
+  if (!action) return;
+  const QString root = action->data().toString();
+  if (root.isEmpty()) return;
+  QString err;
+  if (!ProjectManager::instance().openProject(root, &err)) {
+    QMessageBox::warning(this, _("Open Project"), err.isEmpty() ? _("Failed to open project.") : err);
+    updateRecentProjectActions();
+    return;
+  }
+  const QString target = ProjectManager::instance().aiTargetFile();
+  if (!target.isEmpty()) tabManager->open(target);
+  updateRecentProjectActions();
+}
+
+void MainWindow::updateRecentProjectActions()
+{
+  if (!this->menuRecentProjects) return;
+  this->menuRecentProjects->clear();
+  const QStringList recent = ProjectManager::instance().recentProjects();
+  for (const QString& path : recent) {
+    auto *action = new QAction(QFileInfo(path).fileName().replace("&", "&&"), this);
+    action->setData(path);
+    action->setToolTip(path);
+    connect(action, &QAction::triggered, this, &MainWindow::actionOpenRecentProject);
+    this->menuRecentProjects->addAction(action);
+  }
+  if (!recent.isEmpty()) this->menuRecentProjects->addSeparator();
+  this->menuRecentProjects->addAction(this->fileActionClearRecentProjects);
+}
+
+void MainWindow::onProjectExplorerOpenFile(const QString& path)
+{
+  if (path.isEmpty()) return;
+  QFileInfo info(path);
+  if (!info.exists() || info.isDir()) return;
+
+  const QString suffix = info.suffix().toLower();
+  if (suffix == QLatin1String("png") || suffix == QLatin1String("jpg") ||
+      suffix == QLatin1String("jpeg") || suffix == QLatin1String("webp") ||
+      suffix == QLatin1String("gif") || suffix == QLatin1String("bmp")) {
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    return;
+  }
+  tabManager->open(path);
+  ProjectManager::instance().setActiveFile(path);
+  showEditorView();
+}
+
+void MainWindow::showProjectView()
+{
+  if (!this->editorAreaStack) return;
+  this->editorAreaStack->setCurrentIndex(0);
+  setEditorAreaContentVisible(true);
+  refreshEditorActivityBar();
+}
+
+void MainWindow::showEditorView()
+{
+  if (!this->editorAreaStack) return;
+  this->editorAreaStack->setCurrentIndex(1);
+  setEditorAreaContentVisible(true);
+  refreshEditorActivityBar();
+}
+
+void MainWindow::setEditorAreaContentVisible(bool visible)
+{
+  this->editorAreaContentVisible = visible;
+  if (this->editorAreaStack) {
+    this->editorAreaStack->setVisible(visible);
+  }
+  if (auto *divider = this->editorActivityBar
+                        ? this->editorActivityBar->parentWidget()
+                              ? this->editorActivityBar->parentWidget()->findChild<QFrame *>(
+                                  QStringLiteral("editorActivityDivider"))
+                              : nullptr
+                        : nullptr) {
+    divider->setVisible(visible);
+  }
+
+  // Collapse the whole editor dock to the activity bar width (VS Code hide sidebar).
+  // Hiding the stack alone leaves an empty gray strip because the dock keeps its width.
+  constexpr int kActivityBarW = kEditorActivityBarW;
+  if (this->editorDock) {
+    if (!visible) {
+      const int cur = this->editorDock->width();
+      if (cur > kActivityBarW + 16) this->editorAreaExpandedWidth = cur;
+      this->editorDock->setMinimumWidth(kActivityBarW);
+      this->editorDock->setMaximumWidth(kActivityBarW);
+      resizeDocks({this->editorDock}, {kActivityBarW}, Qt::Horizontal);
+    } else {
+      this->editorDock->setMaximumWidth(QWIDGETSIZE_MAX);
+      this->editorDock->setMinimumWidth(0);
+      const int restore =
+        this->editorAreaExpandedWidth > kActivityBarW ? this->editorAreaExpandedWidth : 400;
+      resizeDocks({this->editorDock}, {restore}, Qt::Horizontal);
+    }
+  }
+  refreshEditorActivityBar();
+}
+
+void MainWindow::refreshEditorActivityBar()
+{
+  const bool showing = this->editorAreaContentVisible && this->editorAreaStack;
+  const int idx = showing ? this->editorAreaStack->currentIndex() : -1;
+  if (this->projectViewTabBtn) this->projectViewTabBtn->setChecked(idx == 0);
+  if (this->editorViewTabBtn) this->editorViewTabBtn->setChecked(idx == 1);
+}
+
+void MainWindow::onProjectActivityClicked()
+{
+  // VS Code: click active activity again → hide the side panel
+  if (this->editorAreaContentVisible && this->editorAreaStack &&
+      this->editorAreaStack->currentIndex() == 0) {
+    setEditorAreaContentVisible(false);
+    return;
+  }
+  showProjectView();
+}
+
+void MainWindow::onEditorActivityClicked()
+{
+  if (this->editorAreaContentVisible && this->editorAreaStack &&
+      this->editorAreaStack->currentIndex() == 1) {
+    setEditorAreaContentVisible(false);
+    return;
+  }
+  showEditorView();
+}
+
+void MainWindow::onProjectManagerChanged()
+{
+  if (this->projectExplorer) this->projectExplorer->refreshTheme();
+  if (this->aiDock && this->aiDock->chatWidget()) {
+    this->aiDock->chatWidget()->onProjectChanged();
+  }
+  // Opening a project should land on the Project activity so the tree is visible.
+  if (ProjectManager::instance().hasProject()) {
+    showProjectView();
+  }
 }
 
 // Updates the content of the recent files menu entries
@@ -3642,6 +3933,11 @@ void MainWindow::onTabManagerEditorChanged(EditorInterface *newEditor)
   colorListDock->setNameSuffix(name);
   viewportControlDock->setNameSuffix(name);
 
+  // Keep AI project target in sync with the visible editor tab.
+  if (!newEditor->filepath.isEmpty()) {
+    ProjectManager::instance().setActiveFile(newEditor->filepath);
+  }
+
   // If there is no renderedEditor we request for a new preview if the
   // auto-reload is enabled.
   if (renderedEditor == nullptr && designActionAutoReload->isChecked() && !MainWindow::isEmpty()) {
@@ -4188,7 +4484,73 @@ void MainWindow::setupEditor(const QStringList& filenames)
 {
   tabManager = new TabManager(this, filenames.isEmpty() ? QString() : filenames[0]);
   activeEditor = tabManager->editor;
-  editorDockContents->layout()->addWidget(tabManager->getTabContent());
+
+  // VS Code activity bar (vertical) + show/hide content panel
+  auto *editorArea = new QWidget(editorDockContents);
+  auto *editorAreaLayout = new QHBoxLayout(editorArea);
+  editorAreaLayout->setContentsMargins(0, 0, 0, 0);
+  editorAreaLayout->setSpacing(0);
+
+  this->editorActivityBar = new QWidget(editorArea);
+  this->editorActivityBar->setObjectName(QStringLiteral("editorActivityBar"));
+  this->editorActivityBar->setFixedWidth(kEditorActivityBarW);
+  auto *activityLayout = new QVBoxLayout(this->editorActivityBar);
+  activityLayout->setContentsMargins(0, 2, 0, 2);
+  activityLayout->setSpacing(0);
+
+  auto makeActivityBtn = [this](const QString& tooltip, const QIcon& icon) {
+    auto *btn = new QToolButton(this->editorActivityBar);
+    btn->setToolTip(tooltip);
+    btn->setCheckable(true);
+    btn->setAutoRaise(true);
+    btn->setCursor(Qt::PointingHandCursor);
+    btn->setFocusPolicy(Qt::NoFocus);
+    btn->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    btn->setIcon(icon);
+    btn->setIconSize(QSize(16, 16));
+    btn->setFixedSize(kEditorActivityBarW, kEditorActivityBarW);
+    return btn;
+  };
+  const bool dark = isDarkMode();
+  this->projectViewTabBtn = makeActivityBtn(_("Project"), projectActivityIcon(dark));
+  this->editorViewTabBtn = makeActivityBtn(_("Editor"), editorActivityIcon(dark));
+  activityLayout->addWidget(this->projectViewTabBtn, 0, Qt::AlignHCenter);
+  activityLayout->addWidget(this->editorViewTabBtn, 0, Qt::AlignHCenter);
+  activityLayout->addStretch(1);
+
+  this->projectExplorer = new ProjectExplorer(editorArea);
+
+  this->editorAreaStack = new QStackedWidget(editorArea);
+  this->editorAreaStack->setObjectName(QStringLiteral("editorAreaStack"));
+  this->editorAreaStack->setFrameShape(QFrame::NoFrame);
+  this->editorAreaStack->addWidget(this->projectExplorer);           // index 0: Project
+  this->editorAreaStack->addWidget(tabManager->getTabContent());     // index 1: Editor
+
+  // Single 1px flat divider (avoids double border / white bevel next to the line).
+  auto *activityDivider = new QFrame(editorArea);
+  activityDivider->setObjectName(QStringLiteral("editorActivityDivider"));
+  activityDivider->setFrameShape(QFrame::NoFrame);
+  activityDivider->setFixedWidth(1);
+  activityDivider->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+
+  editorAreaLayout->addWidget(this->editorActivityBar);
+  editorAreaLayout->addWidget(activityDivider);
+  editorAreaLayout->addWidget(this->editorAreaStack, 1);
+
+  editorDockContents->layout()->addWidget(editorArea);
+
+  connect(this->projectViewTabBtn, &QToolButton::clicked, this, &MainWindow::onProjectActivityClicked);
+  connect(this->editorViewTabBtn, &QToolButton::clicked, this, &MainWindow::onEditorActivityClicked);
+  showEditorView();
+
+  connect(this->projectExplorer, &ProjectExplorer::requestNewProject, this,
+          &MainWindow::on_fileActionNewProject_triggered);
+  connect(this->projectExplorer, &ProjectExplorer::requestOpenProject, this,
+          &MainWindow::on_fileActionOpenProject_triggered);
+  connect(this->projectExplorer, &ProjectExplorer::openFileRequested, this,
+          &MainWindow::onProjectExplorerOpenFile);
+  connect(&ProjectManager::instance(), &ProjectManager::projectChanged, this,
+          &MainWindow::onProjectManagerChanged);
 
   connect(this->fileActionNew, &QAction::triggered, tabManager, &TabManager::actionNew);
   connect(this->fileActionClose, &QAction::triggered, tabManager, &TabManager::closeCurrentTab);
@@ -4225,6 +4587,8 @@ void MainWindow::setupEditor(const QStringList& filenames)
   onTabManagerEditorChanged(activeEditor);
   QObject::connect(editorDock, &Dock::visibilityChanged, this,
                    &MainWindow::onEditorDockVisibilityChanged);
+
+  updateRecentProjectActions();
 }
 
 /**
@@ -4317,6 +4681,11 @@ void MainWindow::setupAIChatRevealButton()
 
     this->previewHeaderRow = new QWidget(barParent);
     this->previewHeaderRow->setObjectName(QStringLiteral("previewHeaderRow"));
+    this->previewHeaderRow->setAttribute(Qt::WA_StyledBackground, true);
+    this->previewHeaderRow->setFixedHeight(kWorkbenchHeaderH);
+    this->previewHeaderRow->setMinimumHeight(kWorkbenchHeaderH);
+    this->previewHeaderRow->setMaximumHeight(kWorkbenchHeaderH);
+    this->previewHeaderRow->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     auto *row = new QHBoxLayout(this->previewHeaderRow);
     row->setContentsMargins(0, 0, 0, 0);
     row->setSpacing(2);
@@ -4560,12 +4929,18 @@ void MainWindow::applyFlatWorkbenchChrome()
       background: %1;
       width: 1px;
       height: 1px;
+      margin: 0px;
+      padding: 0px;
+      border: none;
     }
     QMainWindow::separator:hover {
       background: %2;
     }
     QDockWidget {
       border: none;
+      margin: 0px;
+      padding: 0px;
+      background: %3;
     }
     QDockWidget::title {
       text-align: left;
@@ -4580,13 +4955,25 @@ void MainWindow::applyFlatWorkbenchChrome()
       font-weight: 500;
     }
     QDockWidget > QWidget {
-      background: transparent;
+      background: %3;
       border: none;
+      margin: 0px;
+      padding: 0px;
     }
     QWidget#editorDockContents, QWidget#centralwidget, QWidget#mainWidget,
     QWidget#consoleDockContents, QWidget#errorLogDockContents {
       border: none;
+      margin: 0px;
+      padding: 0px;
       background: %3;
+    }
+    QFrame#editorActivityDivider {
+      background: %1;
+      border: none;
+      margin: 0px;
+      padding: 0px;
+      max-width: 1px;
+      min-width: 1px;
     }
     QWidget#consoleDockContents Console,
     QWidget#consoleDockContents QPlainTextEdit {
@@ -4621,14 +5008,16 @@ void MainWindow::applyFlatWorkbenchChrome()
       border-bottom: 1px solid %1;
       min-height: 32px;
       max-height: 32px;
+      padding: 0px;
     }
     QToolBar#viewerToolBar {
-      background: %4;
+      background: transparent;
       border: none;
       spacing: 1px;
-      padding: 2px 4px;
-      min-height: 32px;
-      max-height: 32px;
+      padding: 0px 4px;
+      margin: 0px;
+      min-height: 31px;
+      max-height: 31px;
     }
     QToolBar#viewerToolBar::separator {
       background: %1;
@@ -4761,7 +5150,9 @@ void MainWindow::applyFlatWorkbenchChrome()
   }
   if (this->previewHeaderRow) {
     this->previewHeaderRow->setAttribute(Qt::WA_StyledBackground, true);
-    this->previewHeaderRow->setFixedHeight(32);
+    this->previewHeaderRow->setFixedHeight(kWorkbenchHeaderH);
+    this->previewHeaderRow->setMinimumHeight(kWorkbenchHeaderH);
+    this->previewHeaderRow->setMaximumHeight(kWorkbenchHeaderH);
   }
   if (auto *grid = find_panel ? qobject_cast<QGridLayout *>(find_panel->layout()) : nullptr) {
     grid->setContentsMargins(6, 4, 6, 4);
@@ -4813,6 +5204,50 @@ void MainWindow::applyFlatWorkbenchChrome()
   }
   if (this->bottomPanelHeader) {
     this->bottomPanelHeader->applyTheme();
+  }
+  if (this->projectExplorer) {
+    this->projectExplorer->refreshTheme();
+  }
+  if (this->editorActivityBar) {
+    this->editorActivityBar->setAttribute(Qt::WA_StyledBackground, true);
+    this->editorActivityBar->setFixedWidth(kEditorActivityBarW);
+    const QString muted = dark ? QStringLiteral("#858585") : QStringLiteral("#616161");
+    const QString hover = dark ? QStringLiteral("#2a2d2e") : QStringLiteral("#e8e8e8");
+    const QString accent = dark ? QStringLiteral("#007acc") : QStringLiteral("#005fb8");
+    const QString barBg = dark ? QStringLiteral("#333333") : QStringLiteral("#f3f3f3");
+    this->editorActivityBar->setStyleSheet(
+      QStringLiteral(R"(
+        QWidget#editorActivityBar {
+          background: %1;
+          border: none;
+        }
+        QWidget#editorActivityBar QToolButton {
+          background: transparent;
+          border: none;
+          border-radius: 0px;
+          border-left: 2px solid transparent;
+          margin: 0px;
+          padding: 0px;
+        }
+        QWidget#editorActivityBar QToolButton:hover {
+          background: %2;
+        }
+        QWidget#editorActivityBar QToolButton:checked {
+          background: %2;
+          border-left: 2px solid %3;
+        }
+      )")
+        .arg(barBg, hover, accent));
+    if (this->projectViewTabBtn) {
+      this->projectViewTabBtn->setIcon(projectActivityIcon(dark));
+      this->projectViewTabBtn->setIconSize(QSize(16, 16));
+      this->projectViewTabBtn->setFixedSize(kEditorActivityBarW, kEditorActivityBarW);
+    }
+    if (this->editorViewTabBtn) {
+      this->editorViewTabBtn->setIcon(editorActivityIcon(dark));
+      this->editorViewTabBtn->setIconSize(QSize(16, 16));
+      this->editorViewTabBtn->setFixedSize(kEditorActivityBarW, kEditorActivityBarW);
+    }
   }
   styleZoomControls();
 

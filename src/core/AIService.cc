@@ -271,6 +271,36 @@ static void appendCadSkill(std::string& sys_prompt, bool compact)
   sys_prompt += skill;
 }
 
+static AIService::ProjectContextProvider& projectContextProviderSlot()
+{
+  static AIService::ProjectContextProvider provider;
+  return provider;
+}
+
+void AIService::setProjectContextProvider(ProjectContextProvider provider)
+{
+  projectContextProviderSlot() = std::move(provider);
+}
+
+std::string AIService::projectContextBlock()
+{
+  if (!projectContextProviderSlot()) return {};
+  try {
+    return projectContextProviderSlot()();
+  } catch (...) {
+    return {};
+  }
+}
+
+static void appendProjectContext(std::string& sys_prompt)
+{
+  const std::string block = AIService::projectContextBlock();
+  if (block.empty()) return;
+  if (sys_prompt.find("### PROJECT CONTEXT") != std::string::npos) return;
+  sys_prompt += "\n\n";
+  sys_prompt += block;
+}
+
 // Old builds seeded restrictive defaults. Strip those exact values so requests are
 // unrestricted unless the user explicitly configures limits.
 static bool stripLegacyDefaultLimits(nlohmann::json& params)
@@ -434,6 +464,7 @@ void AIService::chatCompletionStream(std::vector<ChatMessage>& history, ChunkCal
     appendMandatoryChatReplyRule(sys_prompt);
     appendMandatoryDrawingRule(sys_prompt);
     appendCadSkill(sys_prompt, profileIsLocalModel(config));
+    appendProjectContext(sys_prompt);
 
     bool already_has_system = false;
     if (!history.empty() && history[0].role == "system") {
@@ -584,6 +615,7 @@ void AIService::chatCompletion(const std::vector<ChatMessage>& history, Response
   appendMandatoryChatReplyRule(sys_prompt);
   appendMandatoryDrawingRule(sys_prompt);
   appendCadSkill(sys_prompt, profileIsLocalModel(config));
+  appendProjectContext(sys_prompt);
 
   bool already_has_system = false;
   if (!history.empty() && history[0].role == "system") {

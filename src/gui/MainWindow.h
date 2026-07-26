@@ -120,6 +120,13 @@ public:
   EditorInterface *activeEditor = nullptr;
   TabManager *tabManager;
   AIDock *aiDock;
+  class ProjectExplorer *projectExplorer = nullptr;
+  class QStackedWidget *editorAreaStack = nullptr;
+  class QToolButton *projectViewTabBtn = nullptr;
+  class QToolButton *editorViewTabBtn = nullptr;
+  QWidget *editorActivityBar = nullptr;
+  bool editorAreaContentVisible = true;
+  int editorAreaExpandedWidth = 0;
   QToolButton *aiChatRevealButton = nullptr;
   class BottomPanelHeader *bottomPanelHeader{nullptr};
   class QStackedWidget *bottomPanelStack{nullptr};
@@ -300,6 +307,13 @@ private slots:
   void actionOpenRecent();
   void actionOpenExample();
   void on_fileActionClearRecent_triggered();
+  void on_fileActionNewProject_triggered();
+  void on_fileActionOpenProject_triggered();
+  void on_fileActionClearRecentProjects_triggered();
+  void actionOpenRecentProject();
+  void updateRecentProjectActions();
+  void onProjectExplorerOpenFile(const QString& path);
+  void onProjectManagerChanged();
   void on_fileActionSave_triggered();
   void on_fileActionSaveAs_triggered();
   void on_fileActionPythonRevoke_triggered();
@@ -388,6 +402,13 @@ public:
   void startAIFullRender(std::function<void(const AIRenderResult&)> onComplete);
   void cancelAIFullRenderCallback();
   AIRenderResult collectAIRenderResult();
+  /*! Cursor-style activity bar: show Project explorer or Editor (VS Code show/hide). */
+  void showProjectView();
+  void showEditorView();
+  void setEditorAreaContentVisible(bool visible);
+  void onProjectActivityClicked();
+  void onEditorActivityClicked();
+  void refreshEditorActivityBar();
 public slots:
   void actionRenderPreview();
   void on_designActionPreview_triggered();

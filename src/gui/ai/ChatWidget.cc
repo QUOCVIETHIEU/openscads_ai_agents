@@ -43,6 +43,9 @@
 #include <QHash>
 #include <QVector>
 #include <QJsonArray>
+#include <QFile>
+#include <QDir>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QDockWidget>
@@ -71,6 +74,7 @@
 #include "gui/Preferences.h"
 #include "gui/ai/AIApiKeyDialog.h"
 #include "gui/ai/ChatInputEdit.h"
+#include "gui/project/ProjectManager.h"
 
 namespace {
 
@@ -157,6 +161,9 @@ constexpr const char *kSavedChatsSettingsKey = "ai/savedChats";
 
 QJsonArray loadSavedChatsArray()
 {
+  if (ProjectManager::instance().hasProject()) {
+    return ProjectManager::instance().loadChats();
+  }
   QSettings settings;
   const QByteArray raw = settings.value(kSavedChatsSettingsKey).toByteArray();
   if (raw.isEmpty()) return {};
@@ -166,6 +173,10 @@ QJsonArray loadSavedChatsArray()
 
 void storeSavedChatsArray(const QJsonArray& chats)
 {
+  if (ProjectManager::instance().hasProject()) {
+    ProjectManager::instance().storeChats(chats);
+    return;
+  }
   QSettings settings;
   settings.setValue(kSavedChatsSettingsKey, QJsonDocument(chats).toJson(QJsonDocument::Compact));
 }
@@ -537,6 +548,8 @@ ChatWidget::ChatWidget(QWidget *parent) : QWidget(parent)
   setupCursorHeader();
   setupCursorComposer();
   applyVSCodeChrome();
+
+  AIService::setProjectContextProvider([]() { return ProjectManager::instance().buildContextPromptBlock(); });
 
   // Connections
   connect(sendButton, &QPushButton::clicked, this, &ChatWidget::onSendPressed);
@@ -1210,6 +1223,75 @@ void ChatWidget::onHistoryPressed()
   menu.addAction(searchAction);
   menu.addSeparator();
 
+  // Recent projects (each history entry maps to a project folder)
+  {
+    const QStringList recent = ProjectManager::instance().recentProjects();
+    if (!recent.isEmpty()) {
+      auto *projHeaderAction = new QWidgetAction(&menu);
+      auto *projHeader = new QLabel(_("Projects"), &menu);
+      projHeader->setObjectName(QStringLiteral("historyGroupLabel"));
+      projHeader->setContentsMargins(10, 6, 10, 2);
+      projHeaderAction->setDefaultWidget(projHeader);
+      menu.addAction(projHeaderAction);
+
+      for (const QString& root : recent) {
+        auto *action = new QWidgetAction(&menu);
+        auto *row = new QWidget(&menu);
+        row->setObjectName(QStringLiteral("historyRow"));
+        row->setProperty("selected", ProjectManager::instance().rootPath() == root);
+        auto *rowLayout = new QHBoxLayout(row);
+        rowLayout->setContentsMargins(4, 2, 4, 2);
+        auto *open = new QPushButton(row);
+        open->setObjectName(QStringLiteral("historyOpenButton"));
+        open->setCursor(Qt::PointingHandCursor);
+        open->setFlat(true);
+        open->setFocusPolicy(Qt::NoFocus);
+        auto *openLayout = new QVBoxLayout(open);
+        openLayout->setContentsMargins(8, 6, 4, 6);
+        openLayout->setSpacing(2);
+        auto *titleLabel = new QLabel(QFileInfo(root).fileName(), open);
+        titleLabel->setObjectName(QStringLiteral("historyRowTitle"));
+        titleLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+        openLayout->addWidget(titleLabel);
+        auto *pathLabel = new QLabel(root, open);
+        pathLabel->setObjectName(QStringLiteral("historyRowTime"));
+        pathLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+        pathLabel->setWordWrap(false);
+        openLayout->addWidget(pathLabel);
+        connect(open, &QPushButton::clicked, this, [this, root, &menu]() {
+          menu.close();
+          QString err;
+          if (!ProjectManager::instance().openProject(root, &err)) return;
+          MainWindow *mw = nullptr;
+          for (auto *win : scadApp->windowManager.getWindows()) {
+            mw = win;
+            break;
+          }
+          if (mw && mw->tabManager) {
+            const QString target = ProjectManager::instance().aiTargetFile();
+            if (!target.isEmpty()) mw->tabManager->open(target);
+          }
+          onProjectChanged();
+        });
+        rowLayout->addWidget(open, 1);
+        action->setDefaultWidget(row);
+        menu.addAction(action);
+      }
+      menu.addSeparator();
+
+      auto *chatsHeaderAction = new QWidgetAction(&menu);
+      auto *chatsHeader = new QLabel(
+        ProjectManager::instance().hasProject()
+          ? tr("Chats · %1").arg(ProjectManager::instance().projectName())
+          : _("Chats"),
+        &menu);
+      chatsHeader->setObjectName(QStringLiteral("historyGroupLabel"));
+      chatsHeader->setContentsMargins(10, 6, 10, 2);
+      chatsHeaderAction->setDefaultWidget(chatsHeader);
+      menu.addAction(chatsHeaderAction);
+    }
+  }
+
   struct HistoryItem {
     QJsonObject obj;
     QString id;
@@ -1622,14 +1704,18 @@ void ChatWidget::setupCursorHeader()
     delete item;
   }
 
-  headerLayout->setContentsMargins(8, 0, 6, 0);
+  headerLayout->setContentsMargins(8, 0, 6, 1);
   headerLayout->setSpacing(2);
   headerWidget->setFixedHeight(32);
   headerWidget->setAttribute(Qt::WA_StyledBackground, true);
 
   // Single persistent chat — no tab strip / close / new-chat controls
   titleLabel->setParent(headerWidget);
-  titleLabel->setText(_("Chat"));
+  if (ProjectManager::instance().hasProject()) {
+    titleLabel->setText(tr("Chat · %1").arg(ProjectManager::instance().projectName()));
+  } else {
+    titleLabel->setText(_("Chat"));
+  }
   titleLabel->setObjectName("titleLabel");
   headerLayout->addWidget(titleLabel, 0);
   headerLayout->addStretch(1);
@@ -1998,9 +2084,42 @@ void ChatWidget::applyCodeChange(const std::string& code)
     mw = win;
     break;
   }
-  if (mw && mw->activeEditor) {
+  if (!mw) return;
+
+  // Always surface the editor when AI writes code (any prompt / set_editor_code).
+  mw->showEditorView();
+
+  auto& pm = ProjectManager::instance();
+  if (pm.hasProject()) {
+    const QString target = pm.aiTargetFile();
+    if (!target.isEmpty()) {
+      // Open / focus the AI target file, then write.
+      if (mw->tabManager) mw->tabManager->open(target);
+      if (mw->activeEditor) {
+        mw->activeEditor->setText(QString::fromStdString(code));
+        // Persist to disk so the project file stays in sync.
+        QFile f(target);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+          f.write(code.c_str(), static_cast<qint64>(code.size()));
+        }
+        pm.setActiveFile(target);
+      }
+      // Re-assert after open/tab switch in case another handler flipped the stack.
+      mw->showEditorView();
+      QTimer::singleShot(0, mw, [mw]() {
+        if (mw) mw->showEditorView();
+      });
+      pendingPreviewRender = true;
+      return;
+    }
+  }
+
+  if (mw->activeEditor) {
     mw->activeEditor->setText(QString::fromStdString(code));
-    // Defer F5 preview until the assistant turn finishes (once per turn).
+    mw->showEditorView();
+    QTimer::singleShot(0, mw, [mw]() {
+      if (mw) mw->showEditorView();
+    });
     pendingPreviewRender = true;
   }
 }
@@ -2251,25 +2370,30 @@ std::string ChatWidget::formatModelInfo() const
 
 std::string ChatWidget::listSkillNames() const
 {
-  try {
-    const auto dir = PlatformUtils::resourcePath("skills");
-    if (dir.empty() || !std::filesystem::is_directory(dir)) {
-      return "No skills directory found.";
+  nlohmann::json arr = nlohmann::json::array();
+  auto addFromDir = [&](const std::filesystem::path& dir, const char *source) {
+    try {
+      if (dir.empty() || !std::filesystem::is_directory(dir)) return;
+      for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        if (!entry.is_directory()) continue;
+        const auto skillMd = entry.path() / "SKILL.md";
+        if (!std::filesystem::exists(skillMd)) continue;
+        nlohmann::json item = nlohmann::json::object();
+        item["name"] = entry.path().filename().string();
+        item["source"] = source;
+        item["has_compact"] = std::filesystem::exists(entry.path() / "SKILL.compact.md");
+        arr.push_back(item);
+      }
+    } catch (...) {
     }
-    nlohmann::json arr = nlohmann::json::array();
-    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-      if (!entry.is_directory()) continue;
-      const auto skillMd = entry.path() / "SKILL.md";
-      if (!std::filesystem::exists(skillMd)) continue;
-      nlohmann::json item = nlohmann::json::object();
-      item["name"] = entry.path().filename().string();
-      item["has_compact"] = std::filesystem::exists(entry.path() / "SKILL.compact.md");
-      arr.push_back(item);
-    }
-    return arr.dump(2);
-  } catch (const std::exception& e) {
-    return std::string("Error listing skills: ") + e.what();
+  };
+
+  if (ProjectManager::instance().hasProject()) {
+    addFromDir(ProjectManager::instance().skillsDir().toStdString(), "project");
   }
+  addFromDir(PlatformUtils::resourcePath("skills"), "bundled");
+  if (arr.empty()) return "No skills found.";
+  return arr.dump(2);
 }
 
 std::string ChatWidget::loadSkillFile(const std::string& name, bool compact) const
@@ -2278,11 +2402,18 @@ std::string ChatWidget::loadSkillFile(const std::string& name, bool compact) con
       name.find('\\') != std::string::npos) {
     return "Error: invalid skill name.";
   }
+
+  // Prefer project skill
+  if (ProjectManager::instance().hasProject()) {
+    const QString text = ProjectManager::instance().skillText(QString::fromStdString(name), compact);
+    if (!text.isEmpty()) return text.toStdString();
+  }
+
   try {
     const auto dir = PlatformUtils::resourcePath("skills") / name;
     const auto file = dir / (compact ? "SKILL.compact.md" : "SKILL.md");
     if (!std::filesystem::exists(file)) {
-      return "Error: skill file not found: " + file.string();
+      return "Error: skill file not found: " + name;
     }
     std::ifstream in(file);
     if (!in) return "Error: cannot read skill file.";
@@ -2292,6 +2423,40 @@ std::string ChatWidget::loadSkillFile(const std::string& name, bool compact) con
   } catch (const std::exception& e) {
     return std::string("Error loading skill: ") + e.what();
   }
+}
+
+void ChatWidget::onProjectChanged()
+{
+  // Refresh header title
+  if (titleLabel) {
+    if (ProjectManager::instance().hasProject()) {
+      titleLabel->setText(tr("Chat · %1").arg(ProjectManager::instance().projectName()));
+    } else {
+      titleLabel->setText(_("Chat"));
+    }
+  }
+
+  // Switch chat transcript to the project's latest session (or empty).
+  if (isRequestRunning) return;
+  if (!history.empty()) {
+    // Persist outgoing chat into previous scope before switching.
+    saveCurrentSession();
+  }
+
+  const QJsonArray chats = loadSavedChatsArray();
+  if (!chats.isEmpty()) {
+    const QString id = chats.at(0).toObject().value(QStringLiteral("id")).toString();
+    if (!id.isEmpty()) {
+      loadSession(id);
+      return;
+    }
+  }
+
+  // Empty project chat
+  history.clear();
+  currentSessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  clearMessageWidgets();
+  addMessage(_("Project ready. Describe the model — I'll write to the active design file."), false);
 }
 
 std::string ChatWidget::capturePreviewImageBase64(int maxWidth) const
@@ -2370,6 +2535,57 @@ std::string ChatWidget::executeTool(const std::string& name, const std::string& 
     appliedCodeThisTurn = true;
     if (activeAIBubble) activeAIBubble->updateText(tr("Previewing…"));
     result_val = previewAppliedCodeAndDescribe();
+    if (ProjectManager::instance().hasProject()) {
+      const QString target = ProjectManager::instance().aiTargetFile();
+      if (!target.isEmpty()) {
+        result_val = "Applied to: " +
+                     QDir(ProjectManager::instance().rootPath()).relativeFilePath(target).toStdString() +
+                     "\n" + result_val;
+      }
+    }
+  } else if (name == "list_project_files") {
+    result_val = ProjectManager::instance().listProjectFilesText().toStdString();
+  } else if (name == "get_project_rules") {
+    if (!ProjectManager::instance().hasProject()) {
+      result_val = "Error: no project open.";
+    } else {
+      const QString rules = ProjectManager::instance().rulesText();
+      result_val = rules.isEmpty() ? "(no project rules)" : rules.toStdString();
+    }
+  } else if (name == "read_project_file") {
+    if (!ProjectManager::instance().hasProject()) {
+      result_val = "Error: no project open.";
+    } else if (!args.contains("path") || !args["path"].is_string()) {
+      result_val = "Error: Missing required argument 'path'.";
+    } else {
+      const QString rel = QString::fromStdString(args["path"].get<std::string>());
+      QString err;
+      const QString abs = ProjectManager::instance().resolveProjectPath(rel, &err);
+      if (abs.isEmpty()) {
+        result_val = err.isEmpty() ? "Error: invalid path." : err.toStdString();
+      } else {
+        const QString suffix = QFileInfo(abs).suffix().toLower();
+        if (suffix == QLatin1String("png") || suffix == QLatin1String("jpg") ||
+            suffix == QLatin1String("jpeg") || suffix == QLatin1String("webp") ||
+            suffix == QLatin1String("gif") || suffix == QLatin1String("bmp")) {
+          QImage img(abs);
+          if (img.isNull()) {
+            result_val = "Error: cannot load image.";
+          } else {
+            if (img.width() > 1024) img = img.scaledToWidth(1024, Qt::SmoothTransformation);
+            QByteArray bytes;
+            QBuffer buffer(&bytes);
+            buffer.open(QIODevice::WriteOnly);
+            img.save(&buffer, "PNG");
+            result_val = std::string("IMAGE_PNG_BASE64:") + bytes.toBase64().toStdString();
+          }
+        } else {
+          QString err2;
+          const QString text = ProjectManager::instance().readProjectFile(rel, &err2);
+          result_val = err2.isEmpty() ? text.toStdString() : err2.toStdString();
+        }
+      }
+    }
   } else if (name == "trigger_preview") {
     if (mw) {
       if (activeAIBubble) activeAIBubble->updateText(tr("Previewing…"));
@@ -2550,11 +2766,12 @@ std::string ChatWidget::executeTool(const std::string& name, const std::string& 
   } else if (name == "list_tools") {
     result_val =
       "get_editor_code, set_editor_code, trigger_preview, trigger_render, trigger_build, "
+      "list_project_files, read_project_file, get_project_rules, "
       "get_model_info, get_preview_image, get_console_log, list_skills, get_skill, get_cheatsheet, "
       "get_camera_info, pan_view, zoom_in, zoom_out, zoom_100, view_all, reset_view, list_tools\n"
-      "Recommended workflow: get_skill(openscad-cad) → get_editor_code (if editing) → "
-      "set_editor_code (F5 preview) → get_model_info → get_preview_image → iterate with "
-      "set_editor_code/trigger_preview → when done call trigger_render (F6) once.";
+      "Recommended workflow: open a Project → get_skill / get_project_rules → "
+      "set_editor_code (writes AI target file, F5) → get_model_info → get_preview_image → "
+      "iterate → trigger_render once when final.";
   } else {
     result_val = "Error: Unknown tool name '" + name + "'. Call list_tools for the catalog.";
   }

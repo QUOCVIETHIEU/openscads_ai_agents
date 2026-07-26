@@ -75,6 +75,8 @@ public:
   void setCollapsed(bool collapsed);
   bool isCollapsed() const { return panelCollapsed; }
   void applyVSCodeChrome();
+  /*! Called when ProjectManager opens/closes a project — reload chats + header. */
+  void onProjectChanged();
 
 signals:
   void collapsedChanged(bool collapsed);

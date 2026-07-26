@@ -56,6 +56,11 @@ public:
     std::function<std::string(const std::string& name, const std::string& arguments_json)>;
   void registerToolExecutor(ToolExecutor executor);
 
+  /*! Optional provider for open-project context (rules, active file, etc.). */
+  using ProjectContextProvider = std::function<std::string()>;
+  static void setProjectContextProvider(ProjectContextProvider provider);
+  static std::string projectContextBlock();
+
 private:
   class Impl;
   std::unique_ptr<Impl> impl;

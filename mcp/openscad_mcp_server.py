@@ -132,6 +132,30 @@ TOOLS: list[dict[str, Any]] = [
         destructive=False,
     ),
     _tool(
+        "list_project_files",
+        "List files in the open AI project (relative paths). Use before read_project_file.",
+    ),
+    _tool(
+        "get_project_rules",
+        "Return concatenated project rules/*.md for the open project.",
+    ),
+    _tool(
+        "read_project_file",
+        "Read a file inside the open project by relative path "
+        "(e.g. assets/sketch.png or design/main.scad). Images return IMAGE_PNG_BASE64.",
+        {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Project-relative path.",
+                }
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+    ),
+    _tool(
         "get_model_info",
         "Return last/current preview or render facts: success, empty, errors, warnings, "
         "bounding box (mm), facets (after F6), and log. Use after set_editor_code / preview.",

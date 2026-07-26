@@ -328,6 +328,28 @@ nlohmann::json getOpenSCADTools()
             "Alias: trigger_build.");
   addSimple("trigger_build",
             "Alias for trigger_render: full F6 mesh render. Use only when the design is final.");
+  addSimple("list_project_files",
+            "List files in the open AI project (relative paths). Use before read_project_file.");
+  addSimple("get_project_rules",
+            "Return concatenated project rules/*.md (always injected, but re-read when needed).");
+  {
+    nlohmann::json tool = nlohmann::json::object();
+    tool["type"] = "function";
+    nlohmann::json fn = nlohmann::json::object();
+    fn["name"] = "read_project_file";
+    fn["description"] =
+      "Read a file inside the open project by relative path (e.g. assets/sketch.png or "
+      "design/main.scad). Images return IMAGE_PNG_BASE64.";
+    nlohmann::json params = nlohmann::json::object();
+    params["type"] = "object";
+    nlohmann::json props = nlohmann::json::object();
+    props["path"] = {{"type", "string"}, {"description", "Project-relative path."}};
+    params["properties"] = props;
+    params["required"] = nlohmann::json::array({"path"});
+    fn["parameters"] = params;
+    tool["function"] = fn;
+    tools.push_back(tool);
+  }
   addSimple("get_model_info",
             "Return last/current preview or render facts: success, empty, errors, warnings, "
             "bounding box (mm), facets (after F6), and log. Use after set_editor_code / preview.");
