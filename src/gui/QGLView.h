@@ -59,6 +59,8 @@ public slots:
   void ZoomIn();
   void ZoomOut();
   void setMouseCentricZoom(bool var) { this->mouseCentricZoom = var; }
+  void setPanToolActive(bool active);
+  bool isPanToolActive() const { return panToolActive; }
   void setMouseActions(int mouseAction, std::array<float, MouseConfig::ACTION_DIMENSION> var)
   {
     // Load an array defining the behaviour for a single mouse action.
@@ -75,14 +77,24 @@ public:
   void zoomCursor(int x, int y, int zoom);
   void rotate(double x, double y, double z, bool relative);
   void rotate2(double x, double y, double z);
+  /*! View-relative orbit that keeps pivot fixed in world space (click-point orbit). */
+  void rotate2AboutPivot(double x, double y, double z, const Eigen::Vector3d& pivot);
   void translate(double x, double y, double z, bool relative, bool viewPortRelative = true);
+  /*! Grab-hand pan: move the model with the cursor by dx/dy widget pixels (Y+ = down). */
+  void panGrabByPixels(double dx, double dy);
 
 private:
   void init();
+  [[nodiscard]] Eigen::Matrix3d objectRotationMatrix() const;
+  /*! Pick world-space orbit pivot under the cursor; falls back to current look-at. */
+  Eigen::Vector3d pickOrbitPivot(const QPoint& pos);
 
   bool mouse_drag_active;
   bool mouse_drag_moved = true;
   bool mouseCentricZoom = true;
+  bool panToolActive = false;
+  bool hasOrbitPivot = false;
+  Eigen::Vector3d orbitPivot{0, 0, 0};
   // Information held for each mouse action is a 3x2 rotation matrix, a 3x2 translation matrix, and a
   // zoom 2-vector.
   float mouseActions[MouseConfig::MouseAction::NUM_MOUSE_ACTIONS * MouseConfig::ACTION_DIMENSION];

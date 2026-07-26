@@ -27,6 +27,7 @@ class Camera
 {
 public:
   enum class ProjectionType { ORTHOGONAL, PERSPECTIVE } projection{ProjectionType::PERSPECTIVE};
+  static constexpr double DEFAULT_VIEWER_DISTANCE = 140.0;
   Camera();
   void setup(std::vector<double> params);
   void gimbalDefaultTranslate();

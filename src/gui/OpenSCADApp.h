@@ -29,6 +29,8 @@ public slots:
   void hideFontCacheDialog();
   void setApplicationFont(const QString& family, uint size);
   void setRenderBackend3D(RenderBackend3D backend);
+  /*! Register bundled TTF faces (DejaVu) with Qt so Preferences / UI defaults resolve. */
+  static void registerBundledFonts();
 
 public:
   WindowManager windowManager;

@@ -40,6 +40,7 @@
     <file>icons/chokusen-dark/svg/chokusen-next.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-open.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-orthogonal.svg</file>
+    <file>icons/chokusen-dark/svg/chokusen-pan.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-paper-clip.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-parameter.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-perspective.svg</file>
@@ -73,6 +74,7 @@
     <file>icons/chokusen-dark/svg/chokusen-view-right.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-view-top.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-wireframe.svg</file>
+    <file>icons/chokusen-dark/svg/chokusen-zoom-100.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-zoom-all.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-zoom-in.svg</file>
     <file>icons/chokusen-dark/svg/chokusen-zoom-out.svg</file>

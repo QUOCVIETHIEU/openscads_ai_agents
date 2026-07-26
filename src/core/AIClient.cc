@@ -1,7 +1,9 @@
 #include "AIClient.h"
 #include "HTTPClient.h"
 #include "core/AIFreeAgents.h"
+#include "core/CursorAgentBackend.h"
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <sstream>
 #include <unordered_set>
@@ -224,9 +226,15 @@ class AIClient::Impl
 {
 public:
   std::shared_ptr<HTTPClient> http_client;
+  std::shared_ptr<std::atomic<bool>> cancel_flag = std::make_shared<std::atomic<bool>>(false);
+  std::shared_ptr<std::atomic<uint64_t>> generation = std::make_shared<std::atomic<uint64_t>>(0);
 
   Impl(std::shared_ptr<HTTPClient> client) : http_client(std::move(client)) {}
-  ~Impl() = default;
+  ~Impl()
+  {
+    cancel_flag->store(true);
+    generation->fetch_add(1);
+  }
 
   Impl(const Impl&) = delete;
   Impl& operator=(const Impl&) = delete;
@@ -247,52 +255,183 @@ AIClient& AIClient::operator=(AIClient&&) noexcept = default;
 nlohmann::json getOpenSCADTools()
 {
   nlohmann::json tools = nlohmann::json::array();
+  const auto emptyParams = []() {
+    nlohmann::json p = nlohmann::json::object();
+    p["type"] = "object";
+    p["properties"] = nlohmann::json::object();
+    return p;
+  };
+  const auto addSimple = [&](const char *name, const char *description) {
+    nlohmann::json tool = nlohmann::json::object();
+    tool["type"] = "function";
+    nlohmann::json fn = nlohmann::json::object();
+    fn["name"] = name;
+    fn["description"] = description;
+    fn["parameters"] = emptyParams();
+    tool["function"] = fn;
+    tools.push_back(tool);
+  };
 
-  nlohmann::json set_editor_code = nlohmann::json::object();
-  set_editor_code["type"] = "function";
-  nlohmann::json sec_fn = nlohmann::json::object();
-  sec_fn["name"] = "set_editor_code";
-  sec_fn["description"] =
-    "Apply complete OpenSCAD source code to the editor. A full F6 render (exportable geometry + "
-    "completion sound) runs once when the assistant reply finishes.";
-  nlohmann::json sec_params = nlohmann::json::object();
-  sec_params["type"] = "object";
-  nlohmann::json sec_props = nlohmann::json::object();
-  nlohmann::json sec_code = nlohmann::json::object();
-  sec_code["type"] = "string";
-  sec_code["description"] = "The complete new code or content to put in the editor.";
-  sec_props["code"] = sec_code;
-  sec_params["properties"] = sec_props;
-  sec_params["required"] = nlohmann::json::array({"code"});
-  sec_fn["parameters"] = sec_params;
-  set_editor_code["function"] = sec_fn;
-  tools.push_back(set_editor_code);
+  {
+    nlohmann::json tool = nlohmann::json::object();
+    tool["type"] = "function";
+    nlohmann::json fn = nlohmann::json::object();
+    fn["name"] = "get_skill";
+    fn["description"] =
+      "Load a bundled CAD workflow skill (markdown). Call BEFORE designing complex models. "
+      "Default name=openscad-cad.";
+    nlohmann::json params = nlohmann::json::object();
+    params["type"] = "object";
+    nlohmann::json props = nlohmann::json::object();
+    props["name"] = {{"type", "string"},
+                     {"description", "Skill folder name (default: openscad-cad)."}};
+    props["compact"] = {{"type", "boolean"},
+                        {"description", "If true, load SKILL.compact.md instead of SKILL.md."}};
+    params["properties"] = props;
+    fn["parameters"] = params;
+    tool["function"] = fn;
+    tools.push_back(tool);
+  }
 
-  nlohmann::json get_editor_code = nlohmann::json::object();
-  get_editor_code["type"] = "function";
-  nlohmann::json gec_fn = nlohmann::json::object();
-  gec_fn["name"] = "get_editor_code";
-  gec_fn["description"] = "Retrieve the current source code present in the editor to inspect it.";
-  nlohmann::json gec_params = nlohmann::json::object();
-  gec_params["type"] = "object";
-  gec_params["properties"] = nlohmann::json::object();
-  gec_fn["parameters"] = gec_params;
-  get_editor_code["function"] = gec_fn;
-  tools.push_back(get_editor_code);
+  addSimple("list_skills", "List bundled OpenSCAD CAD skills available via get_skill.");
+  addSimple("get_cheatsheet", "Short OpenSCAD syntax/modeling cheatsheet for quick reference.");
 
-  nlohmann::json trigger_preview = nlohmann::json::object();
-  trigger_preview["type"] = "function";
-  nlohmann::json tp_fn = nlohmann::json::object();
-  tp_fn["name"] = "trigger_preview";
-  tp_fn["description"] =
-    "Queue a full F6 render of the current script. The viewport updates once when the assistant "
-    "reply finishes (same as Design → Render).";
-  nlohmann::json tp_params = nlohmann::json::object();
-  tp_params["type"] = "object";
-  tp_params["properties"] = nlohmann::json::object();
-  tp_fn["parameters"] = tp_params;
-  trigger_preview["function"] = tp_fn;
-  tools.push_back(trigger_preview);
+  {
+    nlohmann::json set_editor_code = nlohmann::json::object();
+    set_editor_code["type"] = "function";
+    nlohmann::json sec_fn = nlohmann::json::object();
+    sec_fn["name"] = "set_editor_code";
+    sec_fn["description"] =
+      "Apply complete OpenSCAD source code to the editor and run a full F6 render. Always pass the "
+      "FULL file. After success, call get_model_info and get_preview_image to verify quality.";
+    nlohmann::json sec_params = nlohmann::json::object();
+    sec_params["type"] = "object";
+    nlohmann::json sec_props = nlohmann::json::object();
+    nlohmann::json sec_code = nlohmann::json::object();
+    sec_code["type"] = "string";
+    sec_code["description"] = "The complete new code or content to put in the editor.";
+    sec_props["code"] = sec_code;
+    sec_params["properties"] = sec_props;
+    sec_params["required"] = nlohmann::json::array({"code"});
+    sec_fn["parameters"] = sec_params;
+    set_editor_code["function"] = sec_fn;
+    tools.push_back(set_editor_code);
+  }
+
+  addSimple("get_editor_code", "Retrieve the current source code present in the editor to inspect it.");
+  addSimple("trigger_preview",
+            "Run a full F6 render of the current editor contents and return render status.");
+  addSimple("get_model_info",
+            "Return last/current render facts: success, empty, errors, warnings, bounding box (mm), "
+            "facets, and log. Use after set_editor_code.");
+
+  {
+    nlohmann::json tool = nlohmann::json::object();
+    tool["type"] = "function";
+    nlohmann::json fn = nlohmann::json::object();
+    fn["name"] = "get_preview_image";
+    fn["description"] =
+      "Capture the current 3D viewport as a PNG so you can SEE the model and judge proportions. "
+      "Call after a successful render.";
+    nlohmann::json params = nlohmann::json::object();
+    params["type"] = "object";
+    nlohmann::json props = nlohmann::json::object();
+    props["max_width"] = {{"type", "integer"},
+                          {"description", "Max image width in pixels (default 1024)."}};
+    params["properties"] = props;
+    fn["parameters"] = params;
+    tool["function"] = fn;
+    tools.push_back(tool);
+  }
+
+  {
+    nlohmann::json tool = nlohmann::json::object();
+    tool["type"] = "function";
+    nlohmann::json fn = nlohmann::json::object();
+    fn["name"] = "get_console_log";
+    fn["description"] = "Read recent OpenSCAD console text (parser/render messages).";
+    nlohmann::json params = nlohmann::json::object();
+    params["type"] = "object";
+    nlohmann::json props = nlohmann::json::object();
+    props["max_chars"] = {
+      {"type", "integer"},
+      {"description", "Max characters to return from the end of the console (default 4000)."}};
+    params["properties"] = props;
+    fn["parameters"] = params;
+    tool["function"] = fn;
+    tools.push_back(tool);
+  }
+
+  addSimple("get_camera_info",
+            "Read the current 3D camera (projection, distance, translation, rotation).");
+
+  {
+    nlohmann::json tool = nlohmann::json::object();
+    tool["type"] = "function";
+    nlohmann::json fn = nlohmann::json::object();
+    fn["name"] = "pan_view";
+    fn["description"] =
+      "Pan/drag the 3D view in the screen plane (grab-hand). Units are millimeters. "
+      "Positive dx moves the model right; positive dy moves it down. Optional dz moves in depth. "
+      "After panning, call get_preview_image to verify framing.";
+    nlohmann::json params = nlohmann::json::object();
+    params["type"] = "object";
+    nlohmann::json props = nlohmann::json::object();
+    props["dx"] = {{"type", "number"},
+                   {"description", "Horizontal pan in mm (positive = model moves right on screen)."}};
+    props["dy"] = {{"type", "number"},
+                   {"description", "Vertical pan in mm (positive = model moves down on screen)."}};
+    props["dz"] = {{"type", "number"},
+                   {"description", "Optional depth pan in mm (positive = away from camera)."}};
+    params["properties"] = props;
+    params["additionalProperties"] = false;
+    fn["parameters"] = params;
+    tool["function"] = fn;
+    tools.push_back(tool);
+  }
+
+  {
+    nlohmann::json tool = nlohmann::json::object();
+    tool["type"] = "function";
+    nlohmann::json fn = nlohmann::json::object();
+    fn["name"] = "zoom_in";
+    fn["description"] =
+      "Zoom the 3D camera in (closer). Optional steps (default 1); each step is one mouse-wheel notch.";
+    nlohmann::json params = nlohmann::json::object();
+    params["type"] = "object";
+    nlohmann::json props = nlohmann::json::object();
+    props["steps"] = {{"type", "integer"}, {"description", "How many zoom steps (default 1, max 20)."}};
+    params["properties"] = props;
+    params["additionalProperties"] = false;
+    fn["parameters"] = params;
+    tool["function"] = fn;
+    tools.push_back(tool);
+  }
+
+  {
+    nlohmann::json tool = nlohmann::json::object();
+    tool["type"] = "function";
+    nlohmann::json fn = nlohmann::json::object();
+    fn["name"] = "zoom_out";
+    fn["description"] =
+      "Zoom the 3D camera out (farther). Optional steps (default 1); each step is one mouse-wheel notch.";
+    nlohmann::json params = nlohmann::json::object();
+    params["type"] = "object";
+    nlohmann::json props = nlohmann::json::object();
+    props["steps"] = {{"type", "integer"}, {"description", "How many zoom steps (default 1, max 20)."}};
+    params["properties"] = props;
+    params["additionalProperties"] = false;
+    fn["parameters"] = params;
+    tool["function"] = fn;
+    tools.push_back(tool);
+  }
+
+  addSimple("zoom_100",
+            "Reset zoom distance to the default 100% camera distance (keeps pan/rotation). "
+            "Use view_all to frame all geometry, or reset_view for a full camera reset.");
+  addSimple("view_all", "Frame the camera to show all geometry (View All).");
+  addSimple("reset_view", "Reset the 3D camera to the default view.");
+  addSimple("list_tools", "List OpenSCAD tools and the recommended CAD workflow order.");
 
   return tools;
 }
@@ -381,6 +520,20 @@ void AIClient::sendChatCompletion(const AIProfileConfig& config,
                                   const std::vector<AIChatMessage>& history,
                                   ResponseCallback on_response, ErrorCallback on_error)
 {
+  if (isCursorAgentEndpoint(config.endpoint)) {
+    const uint64_t gen = impl->generation->fetch_add(1) + 1;
+    impl->cancel_flag->store(false);
+    auto text = std::make_shared<std::string>();
+    runCursorAgentChat(
+      config, history,
+      [text](const std::string& chunk) { *text += chunk; }, on_error,
+      [on_response, text](const std::vector<AIToolCall>& tool_calls) {
+        if (on_response) on_response(*text, tool_calls);
+      },
+      impl->cancel_flag, impl->generation, gen);
+    return;
+  }
+
   const bool geminiCompat = isGeminiOpenAIEndpoint(config.endpoint);
 
   nlohmann::json payload = nlohmann::json::object();
@@ -476,6 +629,15 @@ void AIClient::sendChatCompletionStream(const AIProfileConfig& config,
                                         ChunkCallback on_chunk, ErrorCallback on_error,
                                         CompleteCallback on_complete, bool include_tools)
 {
+  if (isCursorAgentEndpoint(config.endpoint)) {
+    (void)include_tools;
+    const uint64_t gen = impl->generation->fetch_add(1) + 1;
+    impl->cancel_flag->store(false);
+    runCursorAgentChat(config, history, on_chunk, on_error, on_complete, impl->cancel_flag,
+                       impl->generation, gen);
+    return;
+  }
+
   const bool geminiCompat = isGeminiOpenAIEndpoint(config.endpoint);
 
   nlohmann::json payload = nlohmann::json::object();
@@ -530,5 +692,7 @@ void AIClient::sendChatCompletionStream(const AIProfileConfig& config,
 
 void AIClient::cancelPendingRequests()
 {
+  impl->cancel_flag->store(true);
+  impl->generation->fetch_add(1);
   impl->http_client->cancelPendingRequests();
 }

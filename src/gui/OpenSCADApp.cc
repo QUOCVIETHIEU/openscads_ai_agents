@@ -9,8 +9,13 @@
 #ifdef ENABLE_CGAL
 #include "geometry/cgal/CGALCache.h"
 #endif
+#include "platform/PlatformUtils.h"
+
 #include <QApplication>
+#include <QDir>
+#include <QFileInfo>
 #include <QFont>
+#include <QFontDatabase>
 #include <QEvent>
 #include <QObject>
 #include <QProgressDialog>
@@ -31,6 +36,22 @@ OpenSCADApp::OpenSCADApp(int& argc, char **argv) : QApplication(argc, argv)
   // Note: It may be tempting to add more initialization code here, but keep in mind that this is run as
   // part of QApplication initialization, so it's usually better to that in the main gui() function after
   // the OpenSCADApp instance is created.
+}
+
+void OpenSCADApp::registerBundledFonts()
+{
+  // Preferences.ui defaults to "DejaVu Sans". Bundle the TTF faces and register them
+  // with Qt so macOS / Windows installs don't spend time inventing missing-family aliases.
+  const fs::path fontsRoot = PlatformUtils::resourcePath("fonts");
+  if (fontsRoot.empty()) return;
+
+  const QDir dir(QString::fromStdString((fontsRoot / "DejaVu" / "ttf").generic_string()));
+  if (!dir.exists()) return;
+
+  const QFileInfoList files = dir.entryInfoList({QStringLiteral("*.ttf")}, QDir::Files);
+  for (const QFileInfo& fi : files) {
+    QFontDatabase::addApplicationFont(fi.absoluteFilePath());
+  }
 }
 
 OpenSCADApp::~OpenSCADApp()

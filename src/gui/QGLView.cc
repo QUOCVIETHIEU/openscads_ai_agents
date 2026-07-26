@@ -241,10 +241,16 @@ void QGLView::mousePressEvent(QMouseEvent *event)
   last_mouse = event->globalPos();
 #endif
 
-  // Middle-button drag pans the view — use a grabbing-hand cursor.
-  if (event->button() == Qt::MiddleButton) {
+  // Middle-button drag, or Pan tool + left-drag — grabbing-hand cursor.
+  if (event->button() == Qt::MiddleButton ||
+      (panToolActive && event->button() == Qt::LeftButton)) {
     setCursor(Qt::ClosedHandCursor);
   }
+
+  // Capture orbit pivot under the cursor so left-drag rotates around that point
+  // instead of the world origin / default look-at.
+  orbitPivot = pickOrbitPivot(event->pos());
+  hasOrbitPivot = true;
 }
 
 /*
@@ -399,7 +405,8 @@ void QGLView::mouseMoveEvent(QMouseEvent *event)
 
       // Grabbing-hand middle-drag always pans in the view plane (left/right & up/down),
       // matching ClosedHandCursor — even if an older setting still maps middle to fore/back.
-      if (buttonIndex == 1 && modifierIndex == 0) {
+      // Pan toolbar tool also forces left-drag to pan.
+      if ((buttonIndex == 1 && modifierIndex == 0) || (panToolActive && buttonIndex == 0 && modifierIndex == 0)) {
         selectedMouseActions =
           MouseConfig::viewActionArrays.at(MouseConfig::PAN_LR_UD).data();
       }
@@ -415,24 +422,45 @@ void QGLView::mouseMoveEvent(QMouseEvent *event)
         // accumulating world Euler angles, which gimbal-lock and twist unpredictably.
         // Soften gain so small hand movements don't overshoot.
         constexpr double kRotateGain = 0.55;
-        rotate2(rx * kRotateGain, ry * kRotateGain, rz * kRotateGain);
+        const double ax = rx * kRotateGain;
+        const double ay = ry * kRotateGain;
+        const double az = rz * kRotateGain;
+        if (hasOrbitPivot) {
+          rotate2AboutPivot(ax, ay, az, orbitPivot);
+        } else {
+          rotate2(ax, ay, az);
+        }
       }
 
-      // Panning: map pixel motion to world units at the look-at plane so the model
-      // tracks the cursor 1:1 (same scale as zoomCursor / ortho frustum height).
-      const int vp_w = std::max(1, QWidget::width());
-      const int vp_h = std::max(1, QWidget::height());
-      const double half_h = cam.zoomValue() * tan_degrees(cam.fov / 2.0);
-      const double half_w = half_h * aspectratio;
-      const double nx = raw_dx / static_cast<double>(vp_w);
-      const double ny = raw_dy / static_cast<double>(vp_h);
-      const double span_w = 2.0 * half_w;
-      const double span_h = 2.0 * half_h;
-      double mx = selectedMouseActions[6 + 0] * nx * span_w + selectedMouseActions[6 + 1] * ny * span_h;
-      double my = selectedMouseActions[6 + 2] * nx * span_w + selectedMouseActions[6 + 3] * ny * span_h;
-      double mz = selectedMouseActions[6 + 4] * nx * span_w + selectedMouseActions[6 + 5] * ny * span_h;
-      if (!(mx == 0.0 && my == 0.0 && mz == 0.0)) {
-        translate(mx, my, mz, true);
+      // Panning: keep the model under the cursor (grab-hand 1:1) by unprojecting
+      // the screen delta onto the look-at plane. The older Euler+frustum path drifted
+      // badly once the view was rotated.
+      const bool wantsPan = selectedMouseActions[6] != 0.0f || selectedMouseActions[7] != 0.0f ||
+                            selectedMouseActions[8] != 0.0f || selectedMouseActions[9] != 0.0f ||
+                            selectedMouseActions[10] != 0.0f || selectedMouseActions[11] != 0.0f;
+      if (wantsPan && (raw_dx != 0.0 || raw_dy != 0.0)) {
+        const bool screenPlanePan =
+          selectedMouseActions[6] != 0.0f || selectedMouseActions[11] != 0.0f ||
+          selectedMouseActions[7] != 0.0f || selectedMouseActions[10] != 0.0f;
+        const bool depthPan = selectedMouseActions[8] != 0.0f || selectedMouseActions[9] != 0.0f;
+
+        if (screenPlanePan) {
+          // Match PAN_LR_UD signs: +screen X → +view X, +screen Y → −view Z (down).
+          const double pan_dx =
+            selectedMouseActions[6] * raw_dx + selectedMouseActions[7] * raw_dy;
+          const double pan_dy =
+            -(selectedMouseActions[10] * raw_dx + selectedMouseActions[11] * raw_dy);
+          panGrabByPixels(pan_dx, pan_dy);
+        }
+        if (depthPan) {
+          // Fore/back pan still uses the classic zoom-scaled path (into the scene).
+          const int vp_w = std::max(1, QWidget::width());
+          const int vp_h = std::max(1, QWidget::height());
+          double my = selectedMouseActions[6 + 2] * (raw_dx / vp_w) +
+                      selectedMouseActions[6 + 3] * (raw_dy / vp_h);
+          my *= 3.0 * cam.zoomValue();
+          if (my != 0.0) translate(0.0, my, 0.0, true);
+        }
       }
 
       // Zoom from mouse movement
@@ -451,9 +479,12 @@ void QGLView::mouseMoveEvent(QMouseEvent *event)
 void QGLView::mouseReleaseEvent(QMouseEvent *event)
 {
   mouse_drag_active = false;
+  hasOrbitPivot = false;
   releaseMouse();
 
-  if (!(event->buttons() & Qt::MiddleButton)) {
+  if (panToolActive) {
+    setCursor(Qt::OpenHandCursor);
+  } else if (!(event->buttons() & Qt::MiddleButton)) {
     unsetCursor();
   }
 
@@ -551,6 +582,16 @@ void QGLView::ZoomOut()
   zoom(-120, true);
 }
 
+void QGLView::setPanToolActive(bool active)
+{
+  panToolActive = active;
+  if (active) {
+    setCursor(Qt::OpenHandCursor);
+  } else if (!mouse_drag_active) {
+    unsetCursor();
+  }
+}
+
 void QGLView::zoom(double v, bool relative)
 {
   this->cam.zoom(v, relative);
@@ -571,13 +612,70 @@ void QGLView::zoomCursor(int x, int y, int zoom)
   this->cam.zoom(zoom, true);
   const auto dist = cam.zoomValue();
   const auto ratio = old_dist / dist - 1.0;
-  // screen coordinates from -1 to 1
-  const auto screen_x = 2.0 * (x + 0.5) / this->cam.pixel_width - 1.0;
-  const auto screen_y = 1.0 - 2.0 * (y + 0.5) / this->cam.pixel_height;
+  // screen coordinates from -1 to 1 — use logical size so Retina DPR matches mouse coords
+  const double dpr = std::max(1.0e-6, static_cast<double>(devicePixelRatioF()));
+  const double logical_w = std::max(1.0, cam.pixel_width / dpr);
+  const double logical_h = std::max(1.0, cam.pixel_height / dpr);
+  const auto screen_x = 2.0 * (x + 0.5) / logical_w - 1.0;
+  const auto screen_y = 1.0 - 2.0 * (y + 0.5) / logical_h;
   const auto height = dist * tan_degrees(cam.fov / 2);
   const auto mx = ratio * screen_x * (aspectratio * height);
   const auto mz = ratio * screen_y * height;
   translate(-mx, 0, -mz, true);
+}
+
+void QGLView::panGrabByPixels(double dx, double dy)
+{
+  if (dx == 0.0 && dy == 0.0) return;
+
+  makeCurrent();
+
+  // Rebuild the same matrices used for drawing, including object_trans, so unproject
+  // returns deltas in the space we add to object_trans.
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  const auto dist = cam.zoomValue();
+  switch (cam.projection) {
+  case Camera::ProjectionType::PERSPECTIVE:
+    gluPerspective(cam.fov, aspectratio, 0.1 * dist, 100 * dist);
+    break;
+  default:
+  case Camera::ProjectionType::ORTHOGONAL: {
+    const auto height = dist * tan_degrees(cam.fov / 2);
+    glOrtho(-height * aspectratio, height * aspectratio, -height, height, -100 * dist, +100 * dist);
+    break;
+  }
+  }
+  glMatrixMode(GL_MODELVIEW);
+  glLoadIdentity();
+  gluLookAt(0.0, -dist, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+  glRotated(cam.object_rot.x(), 1.0, 0.0, 0.0);
+  glRotated(cam.object_rot.y(), 0.0, 1.0, 0.0);
+  glRotated(cam.object_rot.z(), 0.0, 0.0, 1.0);
+  glTranslated(cam.object_trans.x(), cam.object_trans.y(), cam.object_trans.z());
+
+  GLdouble mv[16];
+  GLdouble pr[16];
+  int vp[4];
+  glGetDoublev(GL_MODELVIEW_MATRIX, mv);
+  glGetDoublev(GL_PROJECTION_MATRIX, pr);
+  glGetIntegerv(GL_VIEWPORT, vp);
+
+  // Depth of the look-at point (model origin after current transforms).
+  GLdouble ox, oy, oz;
+  if (gluProject(0.0, 0.0, 0.0, mv, pr, vp, &ox, &oy, &oz) != GL_TRUE) return;
+
+  const double dpr = std::max(1.0e-6, static_cast<double>(devicePixelRatioF()));
+  GLdouble x0, y0, z0, x1, y1, z1;
+  if (gluUnProject(ox, oy, oz, mv, pr, vp, &x0, &y0, &z0) != GL_TRUE) return;
+  // GL window Y grows upward; widget/mouse Y grows downward.
+  if (gluUnProject(ox + dx * dpr, oy - dy * dpr, oz, mv, pr, vp, &x1, &y1, &z1) != GL_TRUE) return;
+
+  cam.object_trans.x() += (x1 - x0);
+  cam.object_trans.y() += (y1 - y0);
+  cam.object_trans.z() += (z1 - z0);
+  update();
+  emit cameraChanged();
 }
 
 void QGLView::setOrthoMode(bool enabled)
@@ -677,6 +775,77 @@ void QGLView::rotate2(double x, double y, double z)
 
   update();
   emit cameraChanged();
+}
+
+Eigen::Matrix3d QGLView::objectRotationMatrix() const
+{
+  // Matches glRotated(x)*glRotated(y)*glRotated(z) order used in setupCamera().
+  const Matrix3d rx = angle_axis_degrees(cam.object_rot.x(), Vector3d::UnitX());
+  const Matrix3d ry = angle_axis_degrees(cam.object_rot.y(), Vector3d::UnitY());
+  const Matrix3d rz = angle_axis_degrees(cam.object_rot.z(), Vector3d::UnitZ());
+  return rx * ry * rz;
+}
+
+void QGLView::rotate2AboutPivot(double x, double y, double z, const Eigen::Vector3d& pivot)
+{
+  // eye = LookAt * R * (geom + object_trans). Keep `pivot` fixed while changing R:
+  //   R_new * (pivot + t_new) = R_old * (pivot + t_old)
+  const Matrix3d R_old = objectRotationMatrix();
+  const Vector3d v = R_old * (pivot + cam.object_trans);
+  rotate2(x, y, z);
+  const Matrix3d R_new = objectRotationMatrix();
+  cam.object_trans = R_new.inverse() * v - pivot;
+  update();
+  emit cameraChanged();
+}
+
+Eigen::Vector3d QGLView::pickOrbitPivot(const QPoint& pos)
+{
+  // Default: current look-at (same as classic OpenSCAD orbit center).
+  Vector3d fallback = -cam.object_trans;
+
+  if (!isValid()) return fallback;
+
+  makeCurrent();
+  auto guard = sg::make_scope_guard([this]() { this->doneCurrent(); });
+
+  // Use LookAt*R without object_trans — same trick as mouseDoubleClickEvent:
+  // unproject recovers (geom + object_trans), then subtract t to get geom.
+  setupCamera();
+
+  int viewport[4];
+  GLdouble modelview[16];
+  GLdouble projection[16];
+  glGetIntegerv(GL_VIEWPORT, viewport);
+  glGetDoublev(GL_MODELVIEW_MATRIX, modelview);
+  glGetDoublev(GL_PROJECTION_MATRIX, projection);
+
+  const double dpi = this->getDPI();
+  const double win_x = pos.x() * dpi;
+  const double win_y = viewport[3] - pos.y() * dpi;
+
+  GLfloat z = 1.0f;
+  glGetError();
+  glReadPixels(static_cast<GLint>(win_x), static_cast<GLint>(win_y), 1, 1, GL_DEPTH_COMPONENT,
+               GL_FLOAT, &z);
+  if (glGetError() != GL_NO_ERROR) return fallback;
+
+  if (z >= 1.0f - 1e-6f) {
+    // Empty space: orbit around the point on the look-at plane under the cursor.
+    GLdouble lx, ly, lz;
+    if (gluProject(0.0, 0.0, 0.0, modelview, projection, viewport, &lx, &ly, &lz) != GL_TRUE) {
+      return fallback;
+    }
+    z = static_cast<GLfloat>(lz);
+  }
+
+  GLdouble px, py, pz;
+  if (gluUnProject(win_x, win_y, z, modelview, projection, viewport, &px, &py, &pz) != GL_TRUE) {
+    return fallback;
+  }
+
+  // unprojected p = geom + object_trans  →  geom pivot
+  return Vector3d(px, py, pz) - cam.object_trans;
 }
 
 std::vector<SelectedObject> QGLView::findObject(int mouse_x, int mouse_y)

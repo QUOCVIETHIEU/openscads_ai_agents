@@ -97,6 +97,7 @@ private:
   void setupCursorHeader();
   void updateComposerActionButton();
   void updateAgentButton();
+  void updateMcpBadge();
   bool ensureActiveProfileApiKey();
   void enableInput(bool enabled);
   void setUserEditButtonsEnabled(bool enabled);
@@ -106,6 +107,11 @@ private:
   // the render outcome (bounding box / facets on success, diagnostics on failure).
   std::string renderAppliedCodeAndDescribe();
   std::string formatRenderResult(const struct AIRenderResult& rr) const;
+  std::string formatModelInfo() const;
+  std::string loadSkillFile(const std::string& name, bool compact) const;
+  std::string listSkillNames() const;
+  std::string capturePreviewImageBase64(int maxWidth) const;
+  void cacheRenderResult(const struct AIRenderResult& rr);
 
   void clearMessageWidgets();
   void rebuildMessageWidgets();
@@ -131,6 +137,15 @@ private:
   bool isRequestRunning = false;
   bool pendingPreviewRender = false;
   bool appliedCodeThisTurn = false;
+  bool lastRenderValid = false;
+  bool lastRenderSuccess = false;
+  bool lastRenderEmpty = false;
+  int lastRenderErrors = 0;
+  int lastRenderWarnings = 0;
+  bool lastRenderHasBBox = false;
+  double lastRenderBBox[3] = {0, 0, 0};
+  size_t lastRenderFacets = 0;
+  std::string lastRenderLog;
   // Set while executeTool() drives a synchronous F6 render; lets Stop break the wait.
   QEventLoop *activeRenderLoop = nullptr;
   bool panelCollapsed = false;
@@ -138,6 +153,7 @@ private:
 
   QPushButton *attachButton = nullptr;
   QPushButton *agentButton = nullptr;
+  QPushButton *mcpBadge = nullptr;
   QPushButton *historyButton = nullptr;
   QPushButton *clearChatButton = nullptr;
   QPushButton *layoutButton = nullptr;

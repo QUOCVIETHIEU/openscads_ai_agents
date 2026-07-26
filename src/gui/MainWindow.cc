@@ -1923,6 +1923,7 @@ bool MainWindow::checkEditorModified()
 
 void MainWindow::on_designActionReloadAndPreview_triggered()
 {
+  requestFitViewAfterRender();
   actionReloadRenderPreview();
 }
 
@@ -1953,6 +1954,7 @@ void MainWindow::csgReloadRender()
     viewModeThrownTogether();
 #endif
   }
+  applyPendingFitView();
   compileEnded();
 }
 
@@ -1970,6 +1972,7 @@ void MainWindow::prepareCompile(const char *afterCompileSlot, bool procevents, b
 
 void MainWindow::on_designActionPreview_triggered()
 {
+  requestFitViewAfterRender();
   actionRenderPreview();
 }
 
@@ -2010,6 +2013,7 @@ void MainWindow::csgRender()
       activeEditor->contentsRendered = true;
       renderedEditor = activeEditor;
     }
+    pendingFitViewAfterRender = false;
     compileEnded();
     return;
   }
@@ -2034,6 +2038,7 @@ void MainWindow::csgRender()
     img.save(filename, "PNG");
   }
 
+  applyPendingFitView();
   compileEnded();
 }
 
@@ -2105,6 +2110,7 @@ void MainWindow::on_designActionRender_triggered()
   if (GuiLocker::isLocked()) return;
   GuiLocker::lock();
 
+  requestFitViewAfterRender();
   prepareCompile("cgalRender", true, false);
   compile(false);
 }
@@ -2122,6 +2128,7 @@ void MainWindow::cgalRender()
       activeEditor->contentsRendered = true;
       renderedEditor = activeEditor;
     }
+    pendingFitViewAfterRender = false;
     compileEnded();
     return;
   }
@@ -2205,9 +2212,11 @@ void MainWindow::actionRenderDone(const std::shared_ptr<const Geometry>& root_ge
     // Go to CGAL view mode
     viewModeRender();
     resetMeasurementsState(true, "Click to start measuring");
+    applyPendingFitView();
   } else {
     resetMeasurementsState(false, "No top level geometry; render something to enable measurements");
     LOG(message_group::UI_Warning, "No top level geometry to render");
+    pendingFitViewAfterRender = false;
   }
 
   updateStatusBar(nullptr);
@@ -2234,6 +2243,10 @@ void MainWindow::handleMeasurementClicked(QAction *clickedAction)
   }
 
   resetMeasurementsState(true, "Click to start measuring");
+  // Measure tools turn off pan mode.
+  if (viewActionPan && viewActionPan->isChecked()) {
+    viewActionPan->setChecked(false);
+  }
   clickedAction->setToolTip("Click to cancel measurement");
   clickedAction->setChecked(true);
   activeMeasurement = clickedAction;
@@ -3113,51 +3126,74 @@ void MainWindow::editorContentChanged()
   }
 }
 
+void MainWindow::requestFitViewAfterRender()
+{
+  pendingFitViewAfterRender = true;
+}
+
+void MainWindow::applyPendingFitView()
+{
+  if (!pendingFitViewAfterRender) return;
+  pendingFitViewAfterRender = false;
+  if (!this->qglview || !this->qglview->getRenderer()) return;
+  // One-shot framing after Preview/Render — do not re-run on window resize.
+  this->qglview->viewAll();
+  this->qglview->update();
+}
+
 void MainWindow::on_viewActionTop_triggered()
 {
   qglview->cam.object_rot << 90, 0, 0;
+  this->qglview->viewAll();
   this->qglview->update();
 }
 
 void MainWindow::on_viewActionBottom_triggered()
 {
   qglview->cam.object_rot << 270, 0, 0;
+  this->qglview->viewAll();
   this->qglview->update();
 }
 
 void MainWindow::on_viewActionLeft_triggered()
 {
   qglview->cam.object_rot << 0, 0, 90;
+  this->qglview->viewAll();
   this->qglview->update();
 }
 
 void MainWindow::on_viewActionRight_triggered()
 {
   qglview->cam.object_rot << 0, 0, 270;
+  this->qglview->viewAll();
   this->qglview->update();
 }
 
 void MainWindow::on_viewActionFront_triggered()
 {
   qglview->cam.object_rot << 0, 0, 0;
+  this->qglview->viewAll();
   this->qglview->update();
 }
 
 void MainWindow::on_viewActionBack_triggered()
 {
   qglview->cam.object_rot << 0, 0, 180;
+  this->qglview->viewAll();
   this->qglview->update();
 }
 
 void MainWindow::on_viewActionDiagonal_triggered()
 {
   qglview->cam.object_rot << 35, 0, -25;
+  this->qglview->viewAll();
   this->qglview->update();
 }
 
 void MainWindow::on_viewActionCenter_triggered()
 {
   qglview->cam.object_trans << 0, 0, 0;
+  this->qglview->viewAll();
   this->qglview->update();
 }
 
@@ -3205,6 +3241,16 @@ void MainWindow::on_viewActionViewAll_triggered()
 {
   this->qglview->viewAll();
   this->qglview->update();
+}
+
+void MainWindow::on_viewActionPan_toggled(bool checked)
+{
+  if (!this->qglview) return;
+  if (checked) {
+    // Pan tool and measure tools are mutually exclusive.
+    resetMeasurementsState(true, "Click to start measuring");
+  }
+  this->qglview->setPanToolActive(checked);
 }
 
 void MainWindow::on_viewActionHideEditorToolBar_toggled(bool checked)
@@ -4251,11 +4297,17 @@ void MainWindow::setupAIChatRevealButton()
     "QToolButton#aiChatRevealButton:hover { background: rgba(0,0,0,0.08); }"));
 
   connect(this->aiChatRevealButton, &QToolButton::clicked, this, [this]() {
-    if (this->aiDock && this->aiDock->chatWidget()) {
-      this->aiDock->chatWidget()->setCollapsed(false);
-    } else if (this->aiDock) {
+    if (!this->aiDock) return;
+    if (ChatWidget *chat = this->aiDock->chatWidget()) {
+      // Always request expand — setCollapsed also recovers when the flag
+      // is already false but the dock is still hidden.
+      chat->setCollapsed(false);
+    } else {
+      addDockWidget(Qt::RightDockWidgetArea, this->aiDock);
+      this->aiDock->setMinimumWidth(220);
       this->aiDock->show();
       this->aiDock->raise();
+      resizeDocks({this->aiDock}, {320}, Qt::Horizontal);
     }
   });
 
@@ -4275,6 +4327,160 @@ void MainWindow::updateAIChatRevealButton(bool chatHidden)
       this->aiChatRevealButton->raise();
     }
   }
+}
+
+void MainWindow::setupZoomControls()
+{
+  if (!this->viewerToolBar || this->zoomControlGroup) return;
+
+  this->viewerToolBar->removeAction(this->viewActionZoomIn);
+  this->viewerToolBar->removeAction(this->viewActionZoomOut);
+
+  this->zoomControlGroup = new QWidget(this->viewerToolBar);
+  this->zoomControlGroup->setObjectName(QStringLiteral("zoomControlGroup"));
+  this->zoomControlGroup->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+
+  auto *layout = new QHBoxLayout(this->zoomControlGroup);
+  // Keep hover fills inset from the rounded outer border. Qt stylesheets do
+  // not clip child backgrounds to a parent's border radius.
+  layout->setContentsMargins(4, 2, 4, 2);
+  layout->setSpacing(0);
+
+  auto makeZoomButton = [this](const QString& text, const QString& objectName,
+                               const QString& tip) {
+    auto *btn = new QToolButton(this->zoomControlGroup);
+    btn->setObjectName(objectName);
+    btn->setText(text);
+    btn->setToolTip(tip);
+    btn->setAutoRaise(true);
+    btn->setFocusPolicy(Qt::NoFocus);
+    btn->setCursor(Qt::PointingHandCursor);
+    btn->setFixedHeight(20);
+    return btn;
+  };
+
+  auto *zoomOutBtn =
+    makeZoomButton(QStringLiteral("−"), QStringLiteral("zoomOutButton"), _("Zoom Out"));
+  zoomOutBtn->setFixedWidth(24);
+  connect(zoomOutBtn, &QToolButton::clicked, this->viewActionZoomOut, &QAction::trigger);
+
+  this->zoomPercentLabel = new QLabel(QStringLiteral("100%"), this->zoomControlGroup);
+  this->zoomPercentLabel->setObjectName(QStringLiteral("zoomPercentLabel"));
+  this->zoomPercentLabel->setAlignment(Qt::AlignCenter);
+  this->zoomPercentLabel->setMinimumWidth(44);
+  this->zoomPercentLabel->setToolTip(_("Current zoom level (100% = default distance)"));
+
+  auto *zoomInBtn =
+    makeZoomButton(QStringLiteral("+"), QStringLiteral("zoomInButton"), _("Zoom In"));
+  zoomInBtn->setFixedWidth(24);
+  connect(zoomInBtn, &QToolButton::clicked, this->viewActionZoomIn, &QAction::trigger);
+
+  auto *sep = new QFrame(this->zoomControlGroup);
+  sep->setObjectName(QStringLiteral("zoomGroupDivider"));
+  sep->setFrameShape(QFrame::VLine);
+  sep->setFrameShadow(QFrame::Plain);
+  sep->setFixedWidth(1);
+  sep->setFixedHeight(14);
+
+  auto *zoom100Btn =
+    makeZoomButton(QString(), QStringLiteral("zoom100Button"),
+                   _("Reset zoom to 100% (keeps pan and rotation)"));
+  zoom100Btn->setIcon(QIcon::fromTheme(QStringLiteral("chokusen-zoom-100")));
+  zoom100Btn->setIconSize(QSize(14, 14));
+  zoom100Btn->setFixedWidth(24);
+  zoom100Btn->setToolButtonStyle(Qt::ToolButtonIconOnly);
+
+  layout->addWidget(zoomOutBtn);
+  layout->addWidget(this->zoomPercentLabel);
+  layout->addWidget(zoomInBtn);
+  layout->addWidget(sep, 0, Qt::AlignVCenter);
+  layout->addWidget(zoom100Btn);
+
+  this->viewerToolBar->insertWidget(this->viewActionResetView, this->zoomControlGroup);
+
+  connect(zoom100Btn, &QToolButton::clicked, this, [this]() {
+    if (!this->qglview) return;
+    this->qglview->zoom(Camera::DEFAULT_VIEWER_DISTANCE, false);
+  });
+
+  styleZoomControls();
+  updateZoomPercentLabel();
+}
+
+void MainWindow::styleZoomControls()
+{
+  if (!this->zoomControlGroup) return;
+
+  const bool dark = isDarkMode();
+  const QString border = dark ? QStringLiteral("#3a3a3c") : QStringLiteral("#d8d8da");
+  const QString bg = dark ? QStringLiteral("#2b2b2d") : QStringLiteral("#f0f0f2");
+  const QString hover = dark ? QStringLiteral("#414144") : QStringLiteral("#dedee1");
+  const QString pressed = dark ? QStringLiteral("#4a4a4d") : QStringLiteral("#d2d2d5");
+  const QString text = dark ? QStringLiteral("#e0e0e0") : QStringLiteral("#333333");
+  const QString divider = dark ? QStringLiteral("#404040") : QStringLiteral("#e0e0e0");
+
+  this->zoomControlGroup->setStyleSheet(QStringLiteral(R"(
+    QWidget#zoomControlGroup {
+      background: %1;
+      border: 1px solid %2;
+      border-radius: 7px;
+      margin: 0px 2px;
+    }
+    QWidget#zoomControlGroup QToolButton {
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      color: %3;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 0px 4px;
+      margin: 0px;
+    }
+    QWidget#zoomControlGroup QToolButton#zoom100Button {
+      padding: 0px;
+    }
+    QWidget#zoomControlGroup QToolButton:hover {
+      background: %4;
+    }
+    QWidget#zoomControlGroup QToolButton:pressed {
+      background: %5;
+    }
+    QLabel#zoomPercentLabel {
+      background: transparent;
+      color: %3;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 0px 2px;
+      min-width: 44px;
+    }
+    QFrame#zoomGroupDivider {
+      background: %6;
+      border: none;
+      max-width: 1px;
+      margin: 0px 2px;
+    }
+  )")
+                                          .arg(bg, border, text, hover, pressed, divider));
+}
+
+void MainWindow::updateZoomPercentLabel()
+{
+  if (!this->zoomPercentLabel || !this->qglview) return;
+
+  const double distance = this->qglview->cam.zoomValue();
+  if (distance <= 0.0) {
+    this->zoomPercentLabel->setText(QStringLiteral("—"));
+    return;
+  }
+
+  const int percent =
+    qRound(100.0 * Camera::DEFAULT_VIEWER_DISTANCE / distance);
+  const int clamped = qBound(percent, 1, 9999);
+  this->zoomPercentLabel->setText(QStringLiteral("%1%").arg(clamped));
+  this->zoomPercentLabel->setToolTip(
+    QString(_("Current zoom: %1%% (distance %2)"))
+      .arg(clamped)
+      .arg(QString::number(distance, 'f', 2)));
 }
 
 void MainWindow::applyFlatWorkbenchChrome()
@@ -4495,6 +4701,7 @@ void MainWindow::applyFlatWorkbenchChrome()
   if (this->bottomPanelHeader) {
     this->bottomPanelHeader->applyTheme();
   }
+  styleZoomControls();
 
   // Keep the built-in editor schemes in sync with the Appearance preference so
   // the code paper matches the chrome (#1e1e1e). Leave custom schemes alone.
@@ -4554,10 +4761,13 @@ void MainWindow::setup3DView()
   connect(this->qglview, &QGLView::cameraChanged, animateWidget, &Animate::cameraChanged);
   connect(this->qglview, &QGLView::cameraChanged, viewportControlWidget,
           &ViewportControl::cameraChanged);
+  connect(this->qglview, &QGLView::cameraChanged, this, &MainWindow::updateZoomPercentLabel);
   connect(this->qglview, &QGLView::resized, viewportControlWidget, &ViewportControl::viewResized);
   connect(this->qglview, &QGLView::doRightClick, this, &MainWindow::rightClick);
   connect(this->qglview, &QGLView::doLeftClick, this, &MainWindow::leftClick);
   connect(this->qglview, &QGLView::initialized, this, &MainWindow::updateViewModeAfterGLInit);
+
+  setupZoomControls();
 }
 
 /**

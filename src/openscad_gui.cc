@@ -284,6 +284,7 @@ int gui(std::vector<std::string>& inputFiles, const std::filesystem::path& origi
 #endif
 
   registerDefaultIcon(app.applicationFilePath());
+  OpenSCADApp::registerBundledFonts();
   app.setApplicationFont(
     GlobalPreferences::inst()->getValue("advanced/applicationFontFamily").toString(),
     GlobalPreferences::inst()->getValue("advanced/applicationFontSize").toUInt());

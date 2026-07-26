@@ -2,12 +2,16 @@
 
 #include "core/AIFreeAgents.h"
 #include "core/AIService.h"
+#include "core/CursorAgentBackend.h"
 #include "gui/Preferences.h"
+#include "gui/ai/OpenSCADAiBridge.h"
 #include "gui/qtgettext.h"
 #include "openscad_gui.h"
 #include "platform/PlatformUtils.h"
 
 #include <QApplication>
+#include <QCheckBox>
+#include <QClipboard>
 #include <QColor>
 #include <QComboBox>
 #include <QTimer>
@@ -127,7 +131,8 @@ QLabel *makeSectionTitle(const QString& text, QWidget *parent)
   return label;
 }
 
-QWidget *makeFieldRow(const QString& label, QWidget *field, QWidget *parent)
+QWidget *makeFieldRow(const QString& label, QWidget *field, QWidget *parent,
+                      Qt::Alignment labelVAlign = Qt::AlignVCenter)
 {
   auto *row = new QWidget(parent);
   auto *layout = new QHBoxLayout(row);
@@ -136,8 +141,8 @@ QWidget *makeFieldRow(const QString& label, QWidget *field, QWidget *parent)
   auto *lbl = new QLabel(label, row);
   lbl->setObjectName(QStringLiteral("fieldLabel"));
   lbl->setFixedWidth(kFieldLabelW);
-  lbl->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
-  layout->addWidget(lbl, 0, Qt::AlignVCenter);
+  lbl->setAlignment(labelVAlign | Qt::AlignRight);
+  layout->addWidget(lbl, 0, labelVAlign | Qt::AlignRight);
   layout->addWidget(field, 1);
   return row;
 }
@@ -196,6 +201,7 @@ void AISettingsPanel::connectAutoSaveHooks()
   connect(apiKeyEdit, &QLineEdit::textChanged, this, &AISettingsPanel::scheduleAutoSave);
   connect(systemPromptEdit, &QPlainTextEdit::textChanged, this, &AISettingsPanel::scheduleAutoSave);
   connect(defaultPromptEdit, &QPlainTextEdit::textChanged, this, &AISettingsPanel::scheduleAutoSave);
+  connect(mcpEnableCheck, &QCheckBox::toggled, this, &AISettingsPanel::scheduleAutoSave);
 }
 
 QString AISettingsPanel::defaultSystemPrompt() const
@@ -401,9 +407,98 @@ void AISettingsPanel::buildUi()
   defaultLayout->addWidget(defaultHint);
   defaultLayout->addWidget(defaultPromptEdit, 1);
 
+  // ===== MCP =====
+  auto *mcpScroll = new QScrollArea(tabs);
+  mcpScroll->setWidgetResizable(true);
+  mcpScroll->setFrameShape(QFrame::NoFrame);
+  mcpScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  mcpScroll->setObjectName(QStringLiteral("generalScroll"));
+
+  auto *mcpPage = new QWidget();
+  mcpPage->setObjectName(QStringLiteral("generalPage"));
+  auto *mcp = new QVBoxLayout(mcpPage);
+  mcp->setContentsMargins(16, 14, 16, 14);
+  mcp->setSpacing(10);
+
+  mcp->addWidget(makeSectionTitle(_("MCP bridge (Model Context Protocol)"), mcpPage));
+
+  auto *mcpHint = new QLabel(
+    _("Exposes OpenSCAD tools to AI agents over local STDIO (Cursor, Claude Desktop, Codex). "
+      "Keep OpenSCAD running while clients are connected."),
+    mcpPage);
+  mcpHint->setObjectName(QStringLiteral("mutedHint"));
+  mcpHint->setWordWrap(true);
+  mcp->addWidget(mcpHint);
+
+  mcpEnableCheck = new QCheckBox(_("Enable MCP bridge"), mcpPage);
+  mcpEnableCheck->setToolTip(
+    _("When disabled, AI agents fall back to plain chat (code fences) without native tools."));
+  mcp->addWidget(mcpEnableCheck);
+
+  mcpStatusLabel = new QLabel(mcpPage);
+  mcpStatusLabel->setWordWrap(true);
+  mcpStatusLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  mcp->addWidget(makeFieldRow(_("Status"), mcpStatusLabel, mcpPage, Qt::AlignTop));
+
+  auto *copyRow = new QWidget(mcpPage);
+  auto *copyRowLayout = new QHBoxLayout(copyRow);
+  copyRowLayout->setContentsMargins(0, 0, 0, 0);
+  copyRowLayout->setSpacing(8);
+
+  copyMcpConfigButton = new QPushButton(_("Copy MCP config"), copyRow);
+  copyMcpConfigButton->setObjectName(QStringLiteral("secondaryBtn"));
+  copyMcpConfigButton->setCursor(Qt::PointingHandCursor);
+  copyMcpConfigButton->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+  copyMcpConfigButton->setToolTip(
+    _("Copies an mcpServers JSON snippet for ~/.cursor/mcp.json, Claude Desktop, or Codex."));
+
+  copyRowLayout->addWidget(copyMcpConfigButton);
+  copyRowLayout->addStretch(1);
+  mcp->addWidget(makeFieldRow(_("Clients"), copyRow, mcpPage));
+
+  mcp->addSpacing(4);
+  mcp->addWidget(makeDivider(mcpPage));
+  mcp->addSpacing(2);
+  mcp->addWidget(makeSectionTitle(_("Exposed tools"), mcpPage));
+
+  auto *mcpTools = new QLabel(mcpPage);
+  mcpTools->setObjectName(QStringLiteral("infoCard"));
+  mcpTools->setWordWrap(true);
+  mcpTools->setTextFormat(Qt::RichText);
+  mcpTools->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  mcpTools->setText(QStringLiteral(
+    "<ul style='margin:0 0 0 16px; padding:0;'>"
+    "<li style='margin-bottom:4px;'><b>get_skill / list_skills</b> — %1</li>"
+    "<li style='margin-bottom:4px;'><b>get_cheatsheet</b> — %2</li>"
+    "<li style='margin-bottom:4px;'><b>set_editor_code</b> — %3</li>"
+    "<li style='margin-bottom:4px;'><b>get_editor_code / trigger_preview</b> — %4</li>"
+    "<li style='margin-bottom:4px;'><b>get_model_info</b> — %5</li>"
+    "<li style='margin-bottom:4px;'><b>get_preview_image</b> — %6</li>"
+    "<li style='margin-bottom:4px;'><b>get_console_log</b> — %7</li>"
+    "<li style='margin-bottom:4px;'><b>get_camera_info / pan_view / zoom_in / zoom_out / zoom_100 / view_all / reset_view</b> — %8</li>"
+    "<li style='margin-bottom:0;'><b>list_tools</b> — %9</li>"
+    "</ul>"
+    "<p style='margin:8px 0 0 0; opacity:0.85;'>%10</p>")
+    .arg(_("load bundled CAD workflow skills (openscad-cad)"),
+         _("short OpenSCAD syntax reference"),
+         _("apply a full OpenSCAD script and render (F6)"),
+         _("read editor / re-render current code"),
+         _("bbox, facets, errors after render"),
+         _("capture 3D viewport PNG so the model can be judged visually"),
+         _("recent console / parser messages"),
+         _("camera read, pan, zoom in/out/100%, and framing helpers"),
+         _("catalog of tools and recommended order"),
+         _("Prompts: create_model, improve_model, fix_render. "
+           "Best workflow: get_skill → set_editor_code → get_model_info → get_preview_image.")));
+  mcp->addWidget(mcpTools);
+  mcp->addStretch(1);
+
+  mcpScroll->setWidget(mcpPage);
+
   tabs->addTab(generalScroll, _("General"));
   tabs->addTab(systemPage, _("System Prompt"));
   tabs->addTab(defaultPage, _("Default User Prompt"));
+  tabs->addTab(mcpScroll, _("MCP Server"));
   tabs->setMinimumHeight(520);
   tabs->setElideMode(Qt::ElideNone);
   root->addWidget(tabs, 1);
@@ -414,6 +509,7 @@ void AISettingsPanel::buildUi()
   connect(deleteProfileButton, &QPushButton::clicked, this, &AISettingsPanel::onDeleteProfile);
   connect(addParamButton, &QPushButton::clicked, this, &AISettingsPanel::onAddParam);
   connect(resetSystemPromptButton, &QPushButton::clicked, this, &AISettingsPanel::onResetSystemPrompt);
+  connect(copyMcpConfigButton, &QPushButton::clicked, this, &AISettingsPanel::onCopyMcpConfig);
 }
 
 void AISettingsPanel::applyChrome()
@@ -752,8 +848,72 @@ void AISettingsPanel::loadSettings()
   }
   const int idx = profileCombo->findText(active);
   profileCombo->setCurrentIndex(idx >= 0 ? idx : 0);
+  loadMcpSettings();
   loading = false;
   loadProfile(profileCombo->currentText());
+}
+
+void AISettingsPanel::loadMcpSettings()
+{
+  const auto mcp = settings.value("mcp", nlohmann::json::object());
+  mcpEnableCheck->setChecked(mcp.value("enabled", true));
+  updateMcpStatus();
+}
+
+void AISettingsPanel::applyMcpBridgeState()
+{
+  auto& bridge = OpenSCADAiBridge::instance();
+  const bool enabled = mcpEnableCheck->isChecked();
+  bridge.setDesiredPort(0);  // always OS-assigned
+  if (!enabled) {
+    if (bridge.isRunning()) bridge.stop();
+  } else if (!bridge.isRunning()) {
+    bridge.start();
+  }
+
+  updateMcpStatus();
+}
+
+void AISettingsPanel::updateMcpStatus()
+{
+  if (!mcpStatusLabel) return;
+  auto& bridge = OpenSCADAiBridge::instance();
+  QString html;
+  if (bridge.isRunning()) {
+    html = QStringLiteral("<span style='color:#2e9e5b;'>●</span> %1 <b>%2</b>")
+             .arg(_("Running at"), bridge.baseUrl());
+  } else if (mcpEnableCheck && mcpEnableCheck->isChecked()) {
+    const QString err = bridge.lastError();
+    html = err.isEmpty() ? _("Stopped — will start with the AI chat panel.")
+                         : _("Failed to start: ") + err;
+  } else {
+    html = _("Disabled");
+  }
+
+  mcpStatusLabel->setTextFormat(Qt::RichText);
+  mcpStatusLabel->setText(html);
+}
+
+void AISettingsPanel::onCopyMcpConfig()
+{
+  const std::string python = resolveMcpPython();
+  const std::string script = resolveMcpServerScriptPath();
+
+  nlohmann::json openscad = nlohmann::json::object();
+  // Cursor IDE requires type=stdio for local command servers.
+  openscad["type"] = "stdio";
+  openscad["command"] = python.empty() ? "python3" : python;
+  openscad["args"] = nlohmann::json::array({script.empty() ? "openscad_mcp_server.py" : script});
+  // No env needed: the server script falls back to ai_bridge.json, which always
+  // holds the current URL (fixed or automatic port).
+  nlohmann::json root = nlohmann::json::object();
+  root["mcpServers"] = nlohmann::json::object({{"openscad", openscad}});
+
+  QApplication::clipboard()->setText(QString::fromStdString(root.dump(2)));
+  copyMcpConfigButton->setText(_("Copied!"));
+  QTimer::singleShot(1500, this, [this]() {
+    if (copyMcpConfigButton) copyMcpConfigButton->setText(_("Copy MCP config"));
+  });
 }
 
 void AISettingsPanel::loadProfile(const QString& profileName)
@@ -778,7 +938,7 @@ void AISettingsPanel::loadProfile(const QString& profileName)
                profileName.contains(QStringLiteral("Anthropic"), Qt::CaseInsensitive)) {
       endpoint = QStringLiteral("https://api.anthropic.com/v1");
     } else if (profileName.contains(QStringLiteral("Cursor"), Qt::CaseInsensitive)) {
-      endpoint = QStringLiteral("https://api.cursor.com/v1");
+      endpoint = QStringLiteral("cursor://agent");
     } else {
       endpoint = QStringLiteral("http://localhost:8080/v1");
     }
@@ -797,8 +957,9 @@ void AISettingsPanel::loadProfile(const QString& profileName)
       model = QStringLiteral("gpt-4o");
     } else if (profileName.contains(QStringLiteral("Claude"), Qt::CaseInsensitive)) {
       model = QStringLiteral("claude-sonnet-4-5");
-    } else if (profileName.contains(QStringLiteral("Cursor"), Qt::CaseInsensitive)) {
-      model = QStringLiteral("auto");
+    } else if (profileName.contains(QStringLiteral("Cursor"), Qt::CaseInsensitive) ||
+               endpoint.startsWith(QStringLiteral("cursor://"))) {
+      model = QStringLiteral("composer-2.5");
     } else {
       model = QStringLiteral("custom");
     }
@@ -816,6 +977,8 @@ void AISettingsPanel::loadProfile(const QString& profileName)
 
   const QString tierNote = QString::fromStdString(params.value("tier_note", ""));
   const bool isOllama = profileName.contains(QStringLiteral("Ollama"), Qt::CaseInsensitive);
+  const bool isCursor = profileName.contains(QStringLiteral("Cursor"), Qt::CaseInsensitive) ||
+                        endpoint.startsWith(QStringLiteral("cursor://"));
   if (hintLabel) {
     if (!tierNote.isEmpty()) {
       hintLabel->setText(tierNote);
@@ -825,6 +988,11 @@ void AISettingsPanel::loadProfile(const QString& profileName)
   }
   if (isOllama) {
     apiKeyEdit->setPlaceholderText(_("No API key needed for Ollama"));
+  } else if (isCursor) {
+    apiKeyEdit->setPlaceholderText(_("Paste Cursor API key (cursor.com/dashboard/integrations)"));
+    if (endpointEdit) {
+      endpointEdit->setPlaceholderText(_("cursor://agent — uses local cursor-agent CLI"));
+    }
   } else {
     apiKeyEdit->setPlaceholderText(_("Paste your API key"));
   }
@@ -1014,9 +1182,12 @@ bool AISettingsPanel::saveAll()
   settings["profiles"][currentProfile.toStdString()] = profileObj;
   settings["activeProfile"] = currentProfile.toStdString();
 
+  settings["mcp"] = nlohmann::json::object({{"enabled", mcpEnableCheck->isChecked()}});
+
   if (!writeSettingsFile(settings)) {
     return false;
   }
+  applyMcpBridgeState();
   // Avoid recursive reload when Preferences embeds this panel with auto-save.
   if (!autoSave) {
     if (auto *prefs = GlobalPreferences::inst()) {

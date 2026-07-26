@@ -11,7 +11,7 @@
 
 namespace {
 
-constexpr double DEFAULT_DISTANCE = 140.0;
+constexpr double DEFAULT_DISTANCE = Camera::DEFAULT_VIEWER_DISTANCE;
 constexpr double DEFAULT_FOV = 22.5;
 constexpr int DEFAULT_WIDTH = 512;
 constexpr int DEFAULT_HEIGHT = 512;

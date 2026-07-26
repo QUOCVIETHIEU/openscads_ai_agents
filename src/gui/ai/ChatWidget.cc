@@ -4,6 +4,7 @@
 #include "core/AIClient.h"
 #include "core/AIFreeAgents.h"
 #include "openscad_gui.h"
+#include "gui/ai/OpenSCADAiBridge.h"
 #include <future>
 #include <QEventLoop>
 #include <QScrollBar>
@@ -28,6 +29,7 @@
 #include <QKeyEvent>
 #include <QApplication>
 #include <QClipboard>
+#include <QThread>
 #include <QPalette>
 #include <QMenu>
 #include <QMessageBox>
@@ -52,6 +54,14 @@
 #include <QInputDialog>
 #include <QLineEdit>
 #include "gui/MainWindow.h"
+#include "gui/QGLView.h"
+#include "gui/Console.h"
+#include "platform/PlatformUtils.h"
+#include <QBuffer>
+#include <filesystem>
+#include <fstream>
+#include <algorithm>
+#include <QImage>
 #include "gui/OpenSCADApp.h"
 #include "gui/Preferences.h"
 #include "gui/ai/AIApiKeyDialog.h"
@@ -118,6 +128,23 @@ QIcon makeSidebarIcon(bool dark)
     p.setBrush(Qt::NoBrush);
     p.drawRoundedRect(QRectF(2.4, 2.8, s - 4.8, s - 5.6), 1.6, 1.6);
     p.drawLine(QPointF(s * 0.66, 2.8), QPointF(s * 0.66, s - 2.8));
+  });
+}
+
+// Crisp status dot with a subtle highlight, so it reads as a small glossy LED
+// rather than a muddy blob. Green when the MCP bridge is live, gray when off.
+QIcon makeStatusDotIcon(const QColor& color)
+{
+  return makeHiDpiIcon(8, [color](QPainter& p, int s) {
+    const QPointF c(s * 0.5, s * 0.5);
+    const qreal r = s * 0.34;
+    p.setPen(Qt::NoPen);
+    p.setBrush(color);
+    p.drawEllipse(c, r, r);
+    // Tiny specular highlight on the upper-left for a refined LED look.
+    QColor hl(255, 255, 255, 150);
+    p.setBrush(hl);
+    p.drawEllipse(QPointF(c.x() - r * 0.32, c.y() - r * 0.32), r * 0.34, r * 0.34);
   });
 }
 
@@ -509,8 +536,11 @@ ChatWidget::ChatWidget(QWidget *parent) : QWidget(parent)
   aiService = std::make_shared<AIService>();
   aliveState = std::make_shared<bool>(true);
 
-  // Register tool executor callback
-  aiService->registerToolExecutor([this](const std::string& name, const std::string& arguments_json) {
+  // Register tool executor callback (HTTP AI path — callbacks arrive off the GUI thread).
+  auto toolExec = [this](const std::string& name, const std::string& arguments_json) {
+    if (QThread::currentThread() == qApp->thread()) {
+      return this->executeTool(name, arguments_json);
+    }
     auto promise = std::make_shared<std::promise<std::string>>();
     auto future = promise->get_future();
 
@@ -529,7 +559,17 @@ ChatWidget::ChatWidget(QWidget *parent) : QWidget(parent)
       Qt::QueuedConnection);
 
     return future.get();
-  });
+  };
+
+  aiService->registerToolExecutor(toolExec);
+
+  // Localhost bridge for MCP tools (same executor; avoids deadlock on GUI thread).
+  // Started only when enabled in AI Settings → MCP.
+  OpenSCADAiBridge::instance().setToolExecutor(toolExec);
+  if (AIFreeAgents::mcpEnabled()) {
+    OpenSCADAiBridge::instance().setDesiredPort(0);
+    OpenSCADAiBridge::instance().start();
+  }
 
   // Start with an empty chat — no welcome greeting.
 
@@ -544,6 +584,8 @@ ChatWidget::~ChatWidget()
 {
   *aliveState = false;
   aiService->cancelPendingRequests();
+  OpenSCADAiBridge::instance().setToolExecutor({});
+  OpenSCADAiBridge::instance().stop();
 }
 
 void ChatWidget::onSendPressed()
@@ -612,6 +654,8 @@ void ChatWidget::onSendPressed()
   enableInput(false);
 
   auto alive = this->aliveState;
+
+  OpenSCADAiBridge::instance().resetSessionStats();
 
   aiService->chatCompletionStream(
     history,
@@ -1022,7 +1066,20 @@ void ChatWidget::onHistoryPressed()
 void ChatWidget::onSettingsPressed()
 {
   AIApiKeyDialog::prompt(this);
+
+  // The MCP enable checkbox may have changed inside the dialog — reconcile the
+  // local bridge so the badge reflects the live state.
+  if (AIFreeAgents::mcpEnabled()) {
+    if (!OpenSCADAiBridge::instance().isRunning()) {
+      OpenSCADAiBridge::instance().setDesiredPort(0);
+      OpenSCADAiBridge::instance().start();
+    }
+  } else if (OpenSCADAiBridge::instance().isRunning()) {
+    OpenSCADAiBridge::instance().stop();
+  }
+
   updateAgentButton();
+  updateMcpBadge();
 }
 
 QDockWidget *ChatWidget::parentDock() const
@@ -1073,24 +1130,41 @@ void ChatWidget::restoreExpandedChrome()
 
 void ChatWidget::setCollapsed(bool collapsed)
 {
-  if (panelCollapsed == collapsed) return;
+  QDockWidget *dock = parentDock();
+  // If expand was requested but the dock is already marked expanded while still
+  // hidden (e.g. closed via Window menu), fall through and force it visible.
+  const bool alreadyExpandedButHidden =
+    !collapsed && !panelCollapsed && dock && !dock->isVisible();
+  if (panelCollapsed == collapsed && !alreadyExpandedButHidden) return;
   panelCollapsed = collapsed;
 
-  QDockWidget *dock = parentDock();
   if (collapsed) {
     if (dock) {
-      expandedDockWidth = qMax(200, dock->width());
+      expandedDockWidth = qMax(280, dock->width());
       dock->hide();
     }
   } else {
     restoreExpandedChrome();
     if (dock) {
+      const int targetW = qMax(280, expandedDockWidth);
       dock->setMinimumWidth(220);
       dock->setMaximumWidth(QWIDGETSIZE_MAX);
+      auto *mw = qobject_cast<QMainWindow *>(dock->window());
+      if (!mw) mw = qobject_cast<QMainWindow *>(dock->parentWidget());
+      if (mw) {
+        // Closed docks can leave the right area empty; re-assert placement.
+        mw->addDockWidget(Qt::RightDockWidgetArea, dock);
+      }
+      dock->setVisible(true);
       dock->show();
       dock->raise();
-      if (auto *mw = qobject_cast<QMainWindow *>(dock->parentWidget())) {
-        mw->resizeDocks({dock}, {expandedDockWidth}, Qt::Horizontal);
+      if (mw) {
+        mw->resizeDocks({dock}, {targetW}, Qt::Horizontal);
+        // Qt often applies dock sizes only after the next layout pass.
+        QTimer::singleShot(0, dock, [mw, dock, targetW]() {
+          if (!mw || !dock || !dock->isVisible()) return;
+          mw->resizeDocks({dock}, {targetW}, Qt::Horizontal);
+        });
       }
     }
   }
@@ -1100,7 +1174,9 @@ void ChatWidget::setCollapsed(bool collapsed)
 
 void ChatWidget::onTogglePanelPressed()
 {
-  setCollapsed(!panelCollapsed);
+  QDockWidget *dock = parentDock();
+  const bool currentlyHidden = panelCollapsed || (dock && !dock->isVisible());
+  setCollapsed(!currentlyHidden);
 }
 
 void ChatWidget::enableInput(bool enabled)
@@ -1262,6 +1338,16 @@ void ChatWidget::setupCursorComposer()
   agentButton->setToolTip(_("Open AI Settings for the active profile"));
   connect(agentButton, &QPushButton::clicked, this, &ChatWidget::onSettingsPressed);
   toolbarLayout->addWidget(agentButton);
+
+  mcpBadge = new QPushButton(QStringLiteral("MCP Server"), toolbar);
+  mcpBadge->setObjectName(QStringLiteral("mcpBadge"));
+  mcpBadge->setFlat(true);
+  mcpBadge->setCursor(Qt::PointingHandCursor);
+  mcpBadge->setFocusPolicy(Qt::NoFocus);
+  mcpBadge->setIconSize(QSize(9, 9));
+  connect(mcpBadge, &QPushButton::clicked, this, &ChatWidget::onSettingsPressed);
+  toolbarLayout->addWidget(mcpBadge);
+
   toolbarLayout->addStretch(1);
 
   attachButton = new QPushButton(toolbar);
@@ -1291,7 +1377,63 @@ void ChatWidget::setupCursorComposer()
   connect(inputField, &ChatInputEdit::imagePasted, this, &ChatWidget::onImagePasted);
   connect(attachButton, &QPushButton::clicked, this, &ChatWidget::onAttachPressed);
   updateAgentButton();
+  updateMcpBadge();
   updateComposerActionButton();
+}
+
+void ChatWidget::updateMcpBadge()
+{
+  if (!mcpBadge) return;
+
+  const bool dark = isDarkTheme();
+  const bool enabled = AIFreeAgents::mcpEnabled();
+  const bool running = OpenSCADAiBridge::instance().isRunning();
+  const bool live = enabled && running;
+
+  const QColor onDot = dark ? QColor("#3fb950") : QColor("#2ea043");
+  const QColor offDot = dark ? QColor("#6e7681") : QColor("#c2c2c2");
+  mcpBadge->setIcon(makeStatusDotIcon(live ? onDot : offDot));
+  mcpBadge->setFixedHeight(20);
+
+  if (live) {
+    mcpBadge->setToolTip(
+      tr("MCP bridge is ON — OpenSCAD tools are exposed to AI agents.\nClick to open AI Settings."));
+  } else if (enabled) {
+    mcpBadge->setToolTip(
+      tr("MCP is enabled but the local bridge is not running yet.\nClick to open AI Settings."));
+  } else {
+    mcpBadge->setToolTip(
+      tr("MCP bridge is OFF — agents fall back to plain chat.\nClick to open AI Settings."));
+  }
+
+  // Refined pill: fully rounded, soft state-tinted fill, no harsh border.
+  QString bg, hover, text;
+  if (live) {
+    bg = dark ? QStringLiteral("rgba(63,185,80,0.16)") : QStringLiteral("rgba(46,160,67,0.12)");
+    hover = dark ? QStringLiteral("rgba(63,185,80,0.26)") : QStringLiteral("rgba(46,160,67,0.20)");
+    text = dark ? QStringLiteral("#57d364") : QStringLiteral("#1a7f37");
+  } else {
+    bg = dark ? QStringLiteral("rgba(255,255,255,0.06)") : QStringLiteral("rgba(0,0,0,0.05)");
+    hover = dark ? QStringLiteral("rgba(255,255,255,0.11)") : QStringLiteral("rgba(0,0,0,0.09)");
+    text = dark ? QStringLiteral("#8b949e") : QStringLiteral("#8a8a8a");
+  }
+
+  mcpBadge->setStyleSheet(QStringLiteral(R"(
+    QPushButton#mcpBadge {
+      border: none;
+      border-radius: 10px;
+      padding: 0px 9px 0px 7px;
+      color: %1;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      background: %2;
+      text-align: center;
+    }
+    QPushButton#mcpBadge:hover { background: %3; }
+    QPushButton#mcpBadge:pressed { padding-top: 1px; }
+  )")
+                            .arg(text, bg, hover));
 }
 
 bool ChatWidget::isDarkTheme() const
@@ -1317,6 +1459,7 @@ void ChatWidget::applyVSCodeChrome()
   if (clearChatButton) clearChatButton->setIcon(QIcon::fromTheme(QStringLiteral("chokusen-recycle")));
   if (layoutButton) layoutButton->setIcon(makeSidebarIcon(dark));
   updateAgentButton();
+  updateMcpBadge();
   updateComposerActionButton();
 
   if (dark) {
@@ -1529,9 +1672,19 @@ void ChatWidget::logToolExecution(const std::string& name, const std::string& re
   } else if (name == "trigger_preview") {
     summary = tr("Queued full render");
     detail = QString::fromStdString("Tool: trigger_preview\nResult: " + result);
+  } else if (name == "get_preview_image") {
+    summary = tr("Captured 3D preview");
+    detail = result.rfind("IMAGE_PNG_BASE64:", 0) == 0
+               ? tr("Tool: get_preview_image\nResult: PNG image (%1 bytes base64).")
+                   .arg(static_cast<int>(result.size()))
+               : QString::fromStdString("Tool: get_preview_image\nResult: " + result);
+  } else if (name == "get_skill") {
+    summary = tr("Loaded CAD skill");
+    detail = tr("Tool: get_skill\nResult: %1 chars.").arg(static_cast<int>(result.size()));
   } else {
     summary = tr("Executed tool: %1").arg(QString::fromStdString(name));
-    detail = QString::fromStdString("Tool: " + name + "\nResult: " + result);
+    detail = QString::fromStdString("Tool: " + name + "\nResult: " +
+                                    (result.size() > 800 ? result.substr(0, 800) + "…" : result));
   }
 
   if (activeAIBubble) {
@@ -1620,6 +1773,8 @@ std::string ChatWidget::renderAppliedCodeAndDescribe()
     return "Cancelled: the render was interrupted by the user.";
   }
 
+  cacheRenderResult(rr);
+
   if (activeAIBubble) {
     activeAIBubble->updateText(rr.success ? tr("Applied code to the editor…")
                                           : tr("Render reported problems…"));
@@ -1627,21 +1782,151 @@ std::string ChatWidget::renderAppliedCodeAndDescribe()
   return formatRenderResult(rr);
 }
 
+void ChatWidget::cacheRenderResult(const AIRenderResult& rr)
+{
+  lastRenderValid = true;
+  lastRenderSuccess = rr.success;
+  lastRenderEmpty = rr.empty;
+  lastRenderErrors = rr.errorCount;
+  lastRenderWarnings = rr.warningCount;
+  lastRenderHasBBox = rr.hasBoundingBox;
+  lastRenderBBox[0] = rr.bboxSize[0];
+  lastRenderBBox[1] = rr.bboxSize[1];
+  lastRenderBBox[2] = rr.bboxSize[2];
+  lastRenderFacets = rr.facets;
+  lastRenderLog = rr.log;
+}
+
+std::string ChatWidget::formatModelInfo() const
+{
+  std::ostringstream os;
+  if (!lastRenderValid) {
+    MainWindow *mw = nullptr;
+    for (auto *win : scadApp->windowManager.getWindows()) {
+      mw = win;
+      break;
+    }
+    if (mw) {
+      const AIRenderResult rr = mw->collectAIRenderResult();
+      os << "success=" << (rr.success ? "true" : "false");
+      os << " empty=" << (rr.empty ? "true" : "false");
+      os << " errors=" << rr.errorCount << " warnings=" << rr.warningCount;
+      if (rr.hasBoundingBox) {
+        os << " bbox_mm=[" << rr.bboxSize[0] << ", " << rr.bboxSize[1] << ", " << rr.bboxSize[2]
+           << "]";
+      }
+      os << " facets=" << rr.facets;
+      if (!rr.log.empty()) os << "\nlog:\n" << rr.log;
+      return os.str();
+    }
+    return "No render result yet. Call set_editor_code or trigger_preview first.";
+  }
+  os << "success=" << (lastRenderSuccess ? "true" : "false");
+  os << " empty=" << (lastRenderEmpty ? "true" : "false");
+  os << " errors=" << lastRenderErrors << " warnings=" << lastRenderWarnings;
+  if (lastRenderHasBBox) {
+    os << " bbox_mm=[" << lastRenderBBox[0] << ", " << lastRenderBBox[1] << ", " << lastRenderBBox[2]
+       << "]";
+  }
+  os << " facets=" << lastRenderFacets;
+  if (!lastRenderLog.empty()) os << "\nlog:\n" << lastRenderLog;
+  return os.str();
+}
+
+std::string ChatWidget::listSkillNames() const
+{
+  try {
+    const auto dir = PlatformUtils::resourcePath("skills");
+    if (dir.empty() || !std::filesystem::is_directory(dir)) {
+      return "No skills directory found.";
+    }
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+      if (!entry.is_directory()) continue;
+      const auto skillMd = entry.path() / "SKILL.md";
+      if (!std::filesystem::exists(skillMd)) continue;
+      nlohmann::json item = nlohmann::json::object();
+      item["name"] = entry.path().filename().string();
+      item["has_compact"] = std::filesystem::exists(entry.path() / "SKILL.compact.md");
+      arr.push_back(item);
+    }
+    return arr.dump(2);
+  } catch (const std::exception& e) {
+    return std::string("Error listing skills: ") + e.what();
+  }
+}
+
+std::string ChatWidget::loadSkillFile(const std::string& name, bool compact) const
+{
+  if (name.empty() || name.find("..") != std::string::npos || name.find('/') != std::string::npos ||
+      name.find('\\') != std::string::npos) {
+    return "Error: invalid skill name.";
+  }
+  try {
+    const auto dir = PlatformUtils::resourcePath("skills") / name;
+    const auto file = dir / (compact ? "SKILL.compact.md" : "SKILL.md");
+    if (!std::filesystem::exists(file)) {
+      return "Error: skill file not found: " + file.string();
+    }
+    std::ifstream in(file);
+    if (!in) return "Error: cannot read skill file.";
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+  } catch (const std::exception& e) {
+    return std::string("Error loading skill: ") + e.what();
+  }
+}
+
+std::string ChatWidget::capturePreviewImageBase64(int maxWidth) const
+{
+  MainWindow *mw = nullptr;
+  for (auto *win : scadApp->windowManager.getWindows()) {
+    mw = win;
+    break;
+  }
+  if (!mw || !mw->qglview) {
+    return "Error: No 3D view available.";
+  }
+  QImage img = mw->qglview->grabFrame();
+  if (img.isNull()) {
+    return "Error: Failed to capture preview image.";
+  }
+  if (maxWidth > 0 && img.width() > maxWidth) {
+    img = img.scaledToWidth(maxWidth, Qt::SmoothTransformation);
+  }
+  QByteArray bytes;
+  QBuffer buffer(&bytes);
+  buffer.open(QIODevice::WriteOnly);
+  if (!img.save(&buffer, "PNG")) {
+    return "Error: Failed to encode PNG.";
+  }
+  return std::string("IMAGE_PNG_BASE64:") + bytes.toBase64().toStdString();
+}
+
 std::string ChatWidget::executeTool(const std::string& name, const std::string& arguments_json)
 {
-  // Drop any partial prose from the tool-call turn; only the final reply is shown in chat.
-  // (Ollama often streams fake tool JSON into content before we recover tool_calls.)
   if (activeResponseText) {
     activeResponseText->clear();
   }
   if (activeAIBubble) {
-    activeAIBubble->updateText(tr("Applying to editor…"));
+    activeAIBubble->updateText(tr("Working…"));
   }
 
   MainWindow *mw = nullptr;
   for (auto *win : scadApp->windowManager.getWindows()) {
     mw = win;
     break;
+  }
+
+  nlohmann::json args = nlohmann::json::object();
+  if (!arguments_json.empty()) {
+    try {
+      args = nlohmann::json::parse(arguments_json);
+      if (!args.is_object()) args = nlohmann::json::object();
+    } catch (...) {
+      args = nlohmann::json::object();
+    }
   }
 
   std::string result_val;
@@ -1653,7 +1938,6 @@ std::string ChatWidget::executeTool(const std::string& name, const std::string& 
       result_val = "Error: No active editor found.";
     }
   } else if (name == "set_editor_code") {
-    auto args = nlohmann::json::parse(arguments_json);
     if (!args.contains("code")) {
       return "Error: Missing required argument 'code'.";
     }
@@ -1668,16 +1952,186 @@ std::string ChatWidget::executeTool(const std::string& name, const std::string& 
     }
     this->applyCodeChange(code);
     appliedCodeThisTurn = true;
-    if (activeAIBubble) {
-      activeAIBubble->updateText(tr("Rendering…"));
-    }
+    if (activeAIBubble) activeAIBubble->updateText(tr("Rendering…"));
     result_val = renderAppliedCodeAndDescribe();
   } else if (name == "trigger_preview") {
-    // Queue a single F6 render for the end of the turn instead of rendering mid-reply.
-    pendingPreviewRender = true;
-    result_val = "Success: Full render queued; it will run once when the reply finishes.";
+    if (mw) {
+      if (activeAIBubble) activeAIBubble->updateText(tr("Rendering…"));
+      result_val = renderAppliedCodeAndDescribe();
+    } else {
+      pendingPreviewRender = true;
+      result_val = "Success: Full render queued; it will run once when the reply finishes.";
+    }
+  } else if (name == "get_model_info") {
+    result_val = formatModelInfo();
+  } else if (name == "get_preview_image") {
+    int maxW = 1024;
+    if (args.contains("max_width") && args["max_width"].is_number_integer()) {
+      maxW = args["max_width"].get<int>();
+    }
+    result_val = capturePreviewImageBase64(maxW);
+  } else if (name == "get_console_log") {
+    int maxChars = 4000;
+    if (args.contains("max_chars") && args["max_chars"].is_number_integer()) {
+      maxChars = std::max(500, args["max_chars"].get<int>());
+    }
+    if (mw && mw->console) {
+      QString text = mw->console->document()->toPlainText();
+      if (text.size() > maxChars) {
+        text = text.right(maxChars);
+        result_val = "…\n" + text.toStdString();
+      } else {
+        result_val = text.toStdString();
+      }
+      if (result_val.empty()) result_val = "(console empty)";
+    } else {
+      result_val = "Error: Console not available.";
+    }
+  } else if (name == "list_skills") {
+    result_val = listSkillNames();
+  } else if (name == "get_skill") {
+    const std::string skillName = args.value("name", "openscad-cad");
+    const bool compact = args.value("compact", false);
+    result_val = loadSkillFile(skillName, compact);
+  } else if (name == "get_cheatsheet") {
+    result_val =
+      "# OpenSCAD quick cheatsheet (mm)\n"
+      "- Units: millimeters. Origin often centered; XY base, +Z up.\n"
+      "- Curved solids: set `$fn = 32`..`64`.\n"
+      "- Modifiers (`translate`/`rotate`/`scale`/`mirror`/`color`/`hull`) wrap the NEXT child — "
+      "never assign a modifier to a variable.\n"
+      "- End statements with `;`. Do NOT put `;` after `module name() { ... }`.\n"
+      "- Through-hole in plate thickness t: cylinder height t+2 protruding both faces "
+      "(avoid coincident faces in difference()).\n"
+      "- Prefer: parameters at top → one module per part → assemble with "
+      "union()/difference()/hull().\n"
+      "- Common: cube([x,y,z], center=true); cylinder(h=h, d=d, center=true); "
+      "sphere(d=d); linear_extrude(height=h) polygon(...); rotate_extrude() ...\n"
+      "- Fillet/rounding last; reduce radius if boolean/minkowski fails.\n"
+      "- Always apply scripts with set_editor_code (full file). Then verify with "
+      "get_model_info / get_preview_image.\n"
+      "- For full workflow call get_skill name=openscad-cad (or compact=true).";
+  } else if (name == "get_camera_info") {
+    if (mw && mw->qglview) {
+      const auto& cam = mw->qglview->cam;
+      nlohmann::json j = nlohmann::json::object();
+      j["projection"] =
+        (cam.projection == Camera::ProjectionType::ORTHOGONAL) ? "ortho" : "perspective";
+      j["fov"] = cam.fov;
+      j["distance"] = cam.viewer_distance;
+      j["object_translation"] = {cam.object_trans.x(), cam.object_trans.y(), cam.object_trans.z()};
+      j["object_rotation"] = {cam.object_rot.x(), cam.object_rot.y(), cam.object_rot.z()};
+      result_val = j.dump(2);
+    } else {
+      result_val = "Error: Camera not available.";
+    }
+  } else if (name == "pan_view") {
+    if (!(mw && mw->qglview)) {
+      result_val = "Error: 3D view not available.";
+    } else {
+      auto readNum = [&](const char *key, double fallback = 0.0) -> double {
+        if (!args.contains(key)) return fallback;
+        const auto& v = args[key];
+        if (v.is_number()) return v.get<double>();
+        if (v.is_string()) {
+          try {
+            return std::stod(v.get<std::string>());
+          } catch (...) {
+            return fallback;
+          }
+        }
+        return fallback;
+      };
+      const double dx = readNum("dx");
+      const double dy = readNum("dy");
+      const double dz = readNum("dz");
+      if (dx == 0.0 && dy == 0.0 && dz == 0.0) {
+        result_val =
+          "Error: pan_view needs at least one of dx, dy, dz (mm in the view plane). "
+          "Example: {\"dx\": 20, \"dy\": -10} — positive dx moves the model right on screen, "
+          "positive dy moves it down (grab-hand drag).";
+      } else {
+        // Match middle-mouse PAN_LR_UD: screen X → view X, screen Y → −view Z.
+        // Optional dz uses the fore/back axis (view Y).
+        mw->qglview->translate(dx, -dz, -dy, true);
+        const auto& cam = mw->qglview->cam;
+        nlohmann::json j = nlohmann::json::object();
+        j["ok"] = true;
+        j["applied_mm"] = {{"dx", dx}, {"dy", dy}, {"dz", dz}};
+        j["object_translation"] = {cam.object_trans.x(), cam.object_trans.y(), cam.object_trans.z()};
+        j["hint"] = "Call get_preview_image to see the new framing.";
+        result_val = j.dump(2);
+      }
+    }
+  } else if (name == "zoom_in" || name == "zoom_out") {
+    if (!(mw && mw->qglview)) {
+      result_val = "Error: 3D view not available.";
+    } else {
+      int steps = 1;
+      if (args.contains("steps")) {
+        if (args["steps"].is_number_integer()) steps = args["steps"].get<int>();
+        else if (args["steps"].is_number()) steps = static_cast<int>(args["steps"].get<double>());
+        else if (args["steps"].is_string()) {
+          try {
+            steps = std::stoi(args["steps"].get<std::string>());
+          } catch (...) {
+            steps = 1;
+          }
+        }
+      }
+      steps = std::clamp(steps, 1, 20);
+      const int notch = (name == "zoom_in") ? 120 : -120;
+      for (int i = 0; i < steps; ++i) {
+        mw->qglview->zoom(notch, true);
+      }
+      nlohmann::json j = nlohmann::json::object();
+      j["ok"] = true;
+      j["action"] = name;
+      j["steps"] = steps;
+      j["distance"] = mw->qglview->cam.viewer_distance;
+      j["hint"] = "Call get_preview_image to see the new framing.";
+      result_val = j.dump(2);
+    }
+  } else if (name == "zoom_100") {
+    if (!(mw && mw->qglview)) {
+      result_val = "Error: 3D view not available.";
+    } else {
+      constexpr double kDefaultDistance = 140.0;
+      mw->qglview->zoom(kDefaultDistance, false);
+      nlohmann::json j = nlohmann::json::object();
+      j["ok"] = true;
+      j["action"] = "zoom_100";
+      j["distance"] = mw->qglview->cam.viewer_distance;
+      j["hint"] = "Zoom reset to default distance (pan/rotation kept). "
+                  "Use view_all to frame geometry, or get_preview_image to verify.";
+      result_val = j.dump(2);
+    }
+  } else if (name == "view_all") {
+    if (mw && mw->qglview) {
+      mw->qglview->viewAll();
+      mw->qglview->update();
+      result_val = "Success: view framed to show all geometry.";
+    } else {
+      result_val = "Error: 3D view not available.";
+    }
+  } else if (name == "reset_view") {
+    if (mw && mw->qglview) {
+      mw->qglview->resetView();
+      mw->qglview->update();
+      result_val = "Success: view reset to default.";
+    } else {
+      result_val = "Error: 3D view not available.";
+    }
+  } else if (name == "list_tools") {
+    result_val =
+      "get_editor_code, set_editor_code, trigger_preview, get_model_info, get_preview_image, "
+      "get_console_log, list_skills, get_skill, get_cheatsheet, get_camera_info, pan_view, "
+      "zoom_in, zoom_out, zoom_100, view_all, reset_view, list_tools\n"
+      "Recommended workflow: get_skill(openscad-cad) → get_editor_code (if editing) → "
+      "set_editor_code → get_model_info → get_preview_image → pan_view/zoom_*/view_all if needed → "
+      "repair if needed.";
   } else {
-    result_val = "Error: Unknown tool name '" + name + "'.";
+    result_val = "Error: Unknown tool name '" + name + "'. Call list_tools for the catalog.";
   }
 
   this->logToolExecution(name, result_val);

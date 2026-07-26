@@ -160,18 +160,17 @@
          <addaction name="designActionRender"/>
          <addaction name="separator"/>
          <addaction name="viewActionViewAll"/>
-         <addaction name="viewActionZoomIn"/>
-         <addaction name="viewActionZoomOut"/>
+         <addaction name="viewActionPan"/>
          <addaction name="viewActionResetView"/>
          <addaction name="designActionMeasureDist"/>
          <addaction name="designActionMeasureAngle"/>
          <addaction name="separator"/>
-         <addaction name="viewActionRight"/>
-         <addaction name="viewActionLeft"/>
-         <addaction name="viewActionBack"/>
-         <addaction name="viewActionFront"/>
          <addaction name="viewActionTop"/>
          <addaction name="viewActionBottom"/>
+         <addaction name="viewActionFront"/>
+         <addaction name="viewActionBack"/>
+         <addaction name="viewActionLeft"/>
+         <addaction name="viewActionRight"/>
          <addaction name="separator"/>
          <addaction name="viewActionPerspective"/>
          <addaction name="viewActionOrthogonal"/>
@@ -361,6 +360,7 @@
     <addaction name="viewActionDiagonal"/>
     <addaction name="viewActionCenter"/>
     <addaction name="viewActionViewAll"/>
+    <addaction name="viewActionPan"/>
     <addaction name="viewActionResetView"/>
     <addaction name="separator"/>
     <addaction name="viewActionZoomIn"/>
@@ -1212,6 +1212,9 @@
    <property name="text">
     <string>&amp;Top</string>
    </property>
+   <property name="toolTip">
+    <string>Top view (+Z) — fit model in view</string>
+   </property>
    <property name="shortcut">
     <string>Ctrl+4</string>
    </property>
@@ -1222,6 +1225,9 @@
    </property>
    <property name="text">
     <string>&amp;Bottom</string>
+   </property>
+   <property name="toolTip">
+    <string>Bottom view (−Z) — fit model in view</string>
    </property>
    <property name="shortcut">
     <string>Ctrl+5</string>
@@ -1234,6 +1240,9 @@
    <property name="text">
     <string>&amp;Left</string>
    </property>
+   <property name="toolTip">
+    <string>Left view (−X) — fit model in view</string>
+   </property>
    <property name="shortcut">
     <string>Ctrl+6</string>
    </property>
@@ -1244,6 +1253,9 @@
    </property>
    <property name="text">
     <string>&amp;Right</string>
+   </property>
+   <property name="toolTip">
+    <string>Right view (+X) — fit model in view</string>
    </property>
    <property name="shortcut">
     <string>Ctrl+7</string>
@@ -1256,6 +1268,9 @@
    <property name="text">
     <string>&amp;Front</string>
    </property>
+   <property name="toolTip">
+    <string>Front view (−Y) — fit model in view</string>
+   </property>
    <property name="shortcut">
     <string>Ctrl+8</string>
    </property>
@@ -1266,6 +1281,9 @@
    </property>
    <property name="text">
     <string>Bac&amp;k</string>
+   </property>
+   <property name="toolTip">
+    <string>Back view (+Y) — fit model in view</string>
    </property>
    <property name="shortcut">
     <string>Ctrl+9</string>
@@ -1527,6 +1545,23 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+Shift+V</string>
+   </property>
+  </action>
+  <action name="viewActionPan">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="icon">
+    <iconset theme="chokusen-pan"/>
+   </property>
+   <property name="text">
+    <string>&amp;Pan View</string>
+   </property>
+   <property name="toolTip">
+    <string>Pan View (drag to move). Middle-mouse also pans.</string>
+   </property>
+   <property name="shortcut">
+    <string>Shift+P</string>
    </property>
   </action>
   <action name="editActionConvertTabsToSpaces">

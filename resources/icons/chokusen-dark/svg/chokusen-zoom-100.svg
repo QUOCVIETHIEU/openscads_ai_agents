@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="100mm" height="100mm" viewBox="-8 -108 116 116" xmlns="http://www.w3.org/2000/svg">
+<title>Zoom 100%</title>
+<!-- Compact 161 glyph (actual-size / default zoom) -->
+<path fill="white" d="
+  M 22,-72 L 34,-72 L 34,-68 L 29,-68 L 29,-32 L 34,-32 L 34,-28 L 22,-28 L 22,-32 L 26,-32 L 26,-68 L 22,-68 Z
+  M 48,-58 L 52,-58 L 52,-54 L 48,-54 Z
+  M 48,-42 L 52,-42 L 52,-38 L 48,-38 Z
+  M 66,-72 L 78,-72 L 78,-68 L 73,-68 L 73,-32 L 78,-32 L 78,-28 L 66,-28 L 66,-32 L 70,-32 L 70,-68 L 66,-68 Z
+"/>
+</svg>

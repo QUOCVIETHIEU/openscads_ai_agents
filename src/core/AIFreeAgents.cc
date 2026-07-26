@@ -69,18 +69,22 @@ struct BuiltInProfile {
 };
 
 // Keep in sync with AI Settings profile list.
-constexpr int kProfileBundleVersion = 5;
+constexpr int kProfileBundleVersion = 7;
 
 const BuiltInProfile *builtInProfiles(size_t& count)
 {
-  // Only OpenAI-compatible chat/completions providers. Cursor Cloud API keys
-  // expose /v1/agents (SDK), not POST /v1/chat/completions — do not list here.
+  // Cursor Agent CLI (cursor-agent -p). Cloud /v1/agents is NOT used here —
+  // OpenSCAD speaks to the local CLI with --mode ask and applies code via
+  // set_editor_code extraction.
   static const BuiltInProfile presets[] = {
     {"Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash",
      "Google Gemini (OpenAI-compatible endpoint)."},
     {"OpenAI", "https://api.openai.com/v1", "gpt-4o", "OpenAI Chat Completions API."},
     {"Claude", "https://api.anthropic.com/v1", "claude-sonnet-4-5",
      "Anthropic Claude. Use an OpenAI-compatible Claude gateway if the native API is not supported."},
+    {"Cursor", "cursor://agent", "composer-2.5",
+     "Cursor Agent CLI + OpenSCAD MCP tools (set_editor_code). Paste key from "
+     "cursor.com/dashboard/integrations. Requires cursor-agent + python3."},
     {"Ollama", "http://localhost:11434/v1", "qwen2.5-coder:14b",
      "Local Ollama OpenAI-compatible server (usually no API key). Prefer qwen2.5-coder for OpenSCAD."},
   };
@@ -109,6 +113,7 @@ std::string mapLegacyToBuiltIn(const std::string& name)
   if (lower.find("claude") != std::string::npos || lower.find("anthropic") != std::string::npos) {
     return "Claude";
   }
+  if (lower.find("cursor") != std::string::npos) return "Cursor";
   if (lower.find("ollama") != std::string::npos) return "Ollama";
   return {};
 }
@@ -136,6 +141,15 @@ void applyBuiltInDefaults(nlohmann::json& profile, const BuiltInProfile& p, bool
   if (!profile.contains("endpoint") || !profile["endpoint"].is_string() ||
       profile["endpoint"].get<std::string>().empty()) {
     profile["endpoint"] = p.endpoint;
+  }
+  // Migrate leftover Cloud API URLs — they are not OpenAI chat/completions.
+  if (std::string(p.name) == "Cursor") {
+    const std::string ep = profile.value("endpoint", "");
+    if (forcePrompt || ep.find("api.cursor.com") != std::string::npos ||
+        ep.find("api2.cursor.sh") != std::string::npos ||
+        ep.find("/v1/chat/completions") != std::string::npos) {
+      profile["endpoint"] = p.endpoint;
+    }
   }
   if (!profile.contains("apiKey") || !profile["apiKey"].is_string()) {
     profile["apiKey"] = "";
@@ -236,7 +250,32 @@ bool ensurePresets(nlohmann::json& settings)
     changed = true;
   }
 
+  // MCP bridge defaults (enabled, automatic port).
+  if (!settings.contains("mcp") || !settings["mcp"].is_object()) {
+    settings["mcp"] = nlohmann::json::object({{"enabled", true}, {"port", 0}});
+    changed = true;
+  } else {
+    auto& mcp = settings["mcp"];
+    if (!mcp.contains("enabled") || !mcp["enabled"].is_boolean()) {
+      mcp["enabled"] = true;
+      changed = true;
+    }
+    if (!mcp.contains("port") || !mcp["port"].is_number_integer()) {
+      mcp["port"] = 0;
+      changed = true;
+    }
+  }
+
   return changed;
+}
+
+bool mcpEnabled()
+{
+  nlohmann::json j;
+  std::string err;
+  if (!loadSettingsJson(j, err)) return true;
+  if (!j.contains("mcp") || !j["mcp"].is_object()) return true;
+  return j["mcp"].value("enabled", true);
 }
 
 bool requiresApiKey(const std::string& profileName)

@@ -5,6 +5,7 @@
 #include <QWidget>
 #include "json/json.hpp"
 
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -26,6 +27,9 @@ public:
   void reloadFromDisk();
   bool saveAll();
   QString defaultSystemPrompt() const;
+  /*! Tab indices: 0 General, 1 System Prompt, 2 Default User Prompt, 3 MCP Server. */
+  void setCurrentTab(int index);
+  void showMcpServerTab();
 
 signals:
   void settingsSaved();
@@ -36,6 +40,7 @@ private slots:
   void onDeleteProfile();
   void onAddParam();
   void onResetSystemPrompt();
+  void onCopyMcpConfig();
   void scheduleAutoSave();
 
 private:
@@ -55,6 +60,9 @@ private:
   void removeParamRow(QWidget *row);
   void ensureDefaultParamRow();
   void connectAutoSaveHooks();
+  void loadMcpSettings();
+  void applyMcpBridgeState();
+  void updateMcpStatus();
 
   nlohmann::json settings;
   QString currentProfile;
@@ -82,4 +90,8 @@ private:
   QWidget *paramHeader = nullptr;
   QPushButton *addParamButton = nullptr;
   QVector<ParamRow> paramRows;
+
+  QCheckBox *mcpEnableCheck = nullptr;
+  QLabel *mcpStatusLabel = nullptr;
+  QPushButton *copyMcpConfigButton = nullptr;
 };

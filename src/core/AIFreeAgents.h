@@ -30,4 +30,7 @@ bool isAuthError(int statusCode, const std::string& responseBody);
 /*! Turn raw provider errors into a clear user-facing message (limit / auth / generic). */
 std::string formatHttpError(int statusCode, const std::string& responseBody);
 
+/*! MCP bridge enabled flag from ai_settings.json ("mcp" section, default true). */
+bool mcpEnabled();
+
 }  // namespace AIFreeAgents

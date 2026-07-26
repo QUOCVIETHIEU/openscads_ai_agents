@@ -1060,6 +1060,7 @@ set(CORE_SOURCES
   src/core/AIClient.cc
   src/core/AIService.cc
   src/core/AIFreeAgents.cc
+  src/core/CursorAgentBackend.cc
   src/core/customizer/Annotation.cc
   src/core/customizer/CommentParser.cc
   src/core/customizer/ParameterObject.cc
@@ -1372,6 +1373,7 @@ set(GUI_SOURCES
   src/gui/ai/ChatInputEdit.cc
   src/gui/ai/AISettingsPanel.cc
   src/gui/ai/AIApiKeyDialog.cc
+  src/gui/ai/OpenSCADAiBridge.cc
   ${INPUT_DRIVER_SOURCES}
   )
 
@@ -1629,7 +1631,12 @@ if(APPLE AND NOT APPLE_UNIX)
   file(COPY ${CMAKE_SOURCE_DIR}/locale DESTINATION ${BUNDLE_RESOURCES_DIR})
   file(COPY ${CMAKE_SOURCE_DIR}/shaders DESTINATION ${BUNDLE_RESOURCES_DIR})
   file(COPY ${CMAKE_SOURCE_DIR}/skills DESTINATION ${BUNDLE_RESOURCES_DIR})
+  file(COPY ${CMAKE_SOURCE_DIR}/mcp DESTINATION ${BUNDLE_RESOURCES_DIR})
   file(COPY ${CMAKE_SOURCE_DIR}/templates DESTINATION ${BUNDLE_RESOURCES_DIR})
+  # file(COPY) only runs at configure time; keep the bundled MCP server fresh on every build.
+  add_custom_command(TARGET OpenSCADExe POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/mcp ${BUNDLE_RESOURCES_DIR}/mcp)
 
   if(ENABLE_GUI_TESTS)
     file(COPY
@@ -1727,6 +1734,7 @@ if(NOT APPLE OR APPLE_UNIX)
   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/locale DESTINATION "${OPENSCAD_INSTALL_RESOURCEDIR}" FILES_MATCHING PATTERN "*/LC_MESSAGES/openscad.mo")
   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/shaders DESTINATION "${OPENSCAD_INSTALL_RESOURCEDIR}")
   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/skills DESTINATION "${OPENSCAD_INSTALL_RESOURCEDIR}" FILES_MATCHING PATTERN "*.md")
+  install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/mcp DESTINATION "${OPENSCAD_INSTALL_RESOURCEDIR}" FILES_MATCHING PATTERN "*.py")
   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/templates DESTINATION "${OPENSCAD_INSTALL_RESOURCEDIR}" FILES_MATCHING PATTERN "*.json")
 
   if(ENABLE_GUI_TESTS)

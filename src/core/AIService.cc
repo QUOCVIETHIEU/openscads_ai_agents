@@ -108,13 +108,19 @@ std::string AIService::systemPromptForProfile(const std::string& profileName)
       "- Use thoughtful hierarchy: base → body → appendages → details (beak, knobs, fasteners).\n"
       "- When refining existing code, be surgical unless the user asked for a full redesign.\n";
   } else if (lower.find("cursor") != std::string::npos) {
-    // Cursor Cloud API is Agent-based, not OpenAI chat/completions. Keep a
-    // short CAD prompt for any leftover custom gateway the user points here.
     prompt +=
-      "\n### PROFILE COACHING — Cursor-compatible gateway\n"
-      "- Only works if the endpoint speaks OpenAI POST /v1/chat/completions.\n"
-      "- Prefer complete, working scripts on the first `set_editor_code` apply.\n"
-      "- Keep modules small and named so iterative edits stay easy.\n";
+      "\n### PROFILE COACHING — Cursor Agent + OpenSCAD MCP\n"
+      "You have native MCP tools: get_skill, get_cheatsheet, get_editor_code, set_editor_code, "
+      "trigger_preview, get_model_info, get_preview_image, get_console_log, get_camera_info, "
+      "pan_view, zoom_in, zoom_out, zoom_100, view_all, reset_view, list_tools, list_skills.\n"
+      "- Call get_skill(openscad-cad) before complex designs.\n"
+      "- ALWAYS apply scripts with set_editor_code (full file). Never paste OpenSCAD in chat.\n"
+      "- After every render: get_model_info then get_preview_image to verify visually.\n"
+      "- Call get_editor_code before editing an existing design.\n"
+      "- If set_editor_code returns [render-error], fix and call set_editor_code again.\n"
+      "- Prefer complete, working scripts on the first apply.\n"
+      "- Keep modules small and named so iterative edits stay easy.\n"
+      "- Chat prose: 2–4 sentences describing parts and sizes after a successful apply.\n";
   } else if (lower.find("ollama") != std::string::npos) {
     // Local/small models: shorter, more rigid instructions.
     prompt =

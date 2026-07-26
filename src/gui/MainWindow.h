@@ -125,6 +125,8 @@ public:
   int bottomPanelNormalHeight{160};
   bool bottomPanelMaximized{false};
   QWidget *previewHeaderRow = nullptr;
+  QWidget *zoomControlGroup = nullptr;
+  QLabel *zoomPercentLabel = nullptr;
 
   std::shared_ptr<const Geometry> rootGeom;
   std::shared_ptr<Renderer> geomRenderer;
@@ -187,6 +189,9 @@ private:
   void applyFlatWorkbenchChrome();
   void setupAIChatRevealButton();
   void updateAIChatRevealButton(bool chatHidden);
+  void setupZoomControls();
+  void styleZoomControls();
+  void updateZoomPercentLabel();
 
 protected:
   void closeEvent(QCloseEvent *event) override;
@@ -319,6 +324,7 @@ private slots:
   void on_editActionCopyVPD_triggered();
   void on_editActionCopyVPF_triggered();
   void on_editActionPreferences_triggered();
+  void on_viewActionPan_toggled(bool checked);
   void on_viewActionHideEditorToolBar_toggled(bool checked);
   void on_viewActionHide3DViewToolBar_toggled(bool checked);
   void showLink(const QString&);
@@ -379,6 +385,7 @@ public:
    *  Not a slot: uses std::function<void(const AIRenderResult&)>, which moc mis-parses. */
   void startAIFullRender(std::function<void(const AIRenderResult&)> onComplete);
   void cancelAIFullRenderCallback();
+  AIRenderResult collectAIRenderResult();
 public slots:
   void actionRenderPreview();
   void on_designActionPreview_triggered();
@@ -522,8 +529,10 @@ private:
   std::vector<std::string> aiRenderMessages;
   std::vector<std::unique_ptr<QTemporaryFile>> allTempFiles;
 
-  AIRenderResult collectAIRenderResult();
   void resetMeasurementsState(bool enable, const QString& tooltipMessage);
+  void requestFitViewAfterRender();
+  void applyPendingFitView();
+  bool pendingFitViewAfterRender = false;
   QActionGroup *measurementGroup;
   QAction *activeMeasurement = nullptr;
 
