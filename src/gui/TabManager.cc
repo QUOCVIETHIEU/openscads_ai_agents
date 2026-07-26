@@ -27,6 +27,8 @@
 #include <QStringList>
 #include <QTabBar>
 #include <QTextStream>
+#include <QStyle>
+#include <QStyleFactory>
 #include <QWidget>
 #include <cassert>
 #include <cstddef>
@@ -57,12 +59,16 @@ void applyVSCodeTabStyle(QTabWidget *tabWidget)
   bar->setDrawBase(false);
   bar->setMovable(true);
   bar->setIconSize(QSize(16, 16));
-  // Match VS Code / Cursor tab strip height
-  bar->setStyle(bar->style());
+  bar->setAttribute(Qt::WA_StyledBackground, true);
+  tabWidget->setAttribute(Qt::WA_StyledBackground, true);
+  static QStyle *fusionTabStyle = QStyleFactory::create(QStringLiteral("Fusion"));
+  if (fusionTabStyle) {
+    bar->setStyle(fusionTabStyle);
+  }
 
   const bool dark = isDarkMode();
 
-  // Closely matches VS Code / Cursor workbench editor tabs (light & dark)
+  // Flat workbench strip — same height/color as Chat + 3D view headers
   QString style;
   if (dark) {
     style = QStringLiteral(R"(
@@ -79,19 +85,20 @@ void applyVSCodeTabStyle(QTabWidget *tabWidget)
         background: #252526;
         border: none;
         border-bottom: 1px solid #2b2b2b;
-        min-height: 28px;
-        max-height: 28px;
+        min-height: 32px;
+        max-height: 32px;
+        qproperty-drawBase: false;
       }
       QTabBar::tab {
-        background: #2d2d2d;
-        color: rgba(204, 204, 204, 0.6);
+        background: transparent;
+        color: rgba(204, 204, 204, 0.65);
         border: none;
-        border-right: 1px solid #252526;
+        border-right: 1px solid #2b2b2b;
         border-radius: 0px;
         min-width: 90px;
         max-width: 200px;
-        min-height: 28px;
-        max-height: 28px;
+        min-height: 32px;
+        max-height: 32px;
         padding: 0px 10px 0px 8px;
         margin: 0px;
         font-size: 12px;
@@ -99,7 +106,6 @@ void applyVSCodeTabStyle(QTabWidget *tabWidget)
       QTabBar::tab:selected {
         background: #1e1e1e;
         color: #ffffff;
-        border-right: 1px solid #2b2b2b;
       }
       QTabBar::tab:hover:!selected {
         background: #2a2d2e;
@@ -107,7 +113,7 @@ void applyVSCodeTabStyle(QTabWidget *tabWidget)
       }
       QTabBar::close-button {
         subcontrol-position: right;
-        margin: 0px 12px 0px 4px;
+        margin: 0px 8px 0px 4px;
       }
       QTabBar::close-button:hover {
         background: #3c3c3c;
@@ -129,19 +135,20 @@ void applyVSCodeTabStyle(QTabWidget *tabWidget)
         background: #f3f3f3;
         border: none;
         border-bottom: 1px solid #e5e5e5;
-        min-height: 28px;
-        max-height: 28px;
+        min-height: 32px;
+        max-height: 32px;
+        qproperty-drawBase: false;
       }
       QTabBar::tab {
-        background: #ececec;
+        background: transparent;
         color: rgba(51, 51, 51, 0.7);
         border: none;
-        border-right: 1px solid #f3f3f3;
+        border-right: 1px solid #e5e5e5;
         border-radius: 0px;
         min-width: 90px;
         max-width: 200px;
-        min-height: 28px;
-        max-height: 28px;
+        min-height: 32px;
+        max-height: 32px;
         padding: 0px 10px 0px 8px;
         margin: 0px;
         font-size: 12px;
@@ -149,7 +156,6 @@ void applyVSCodeTabStyle(QTabWidget *tabWidget)
       QTabBar::tab:selected {
         background: #f8f8f8;
         color: #333333;
-        border-right: 1px solid #e5e5e5;
       }
       QTabBar::tab:hover:!selected {
         background: #e8e8e8;
@@ -157,7 +163,7 @@ void applyVSCodeTabStyle(QTabWidget *tabWidget)
       }
       QTabBar::close-button {
         subcontrol-position: right;
-        margin: 0px 12px 0px 4px;
+        margin: 0px 8px 0px 4px;
       }
       QTabBar::close-button:hover {
         background: #e0e0e0;

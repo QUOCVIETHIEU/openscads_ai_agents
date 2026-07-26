@@ -1360,7 +1360,7 @@ void ChatWidget::onHistoryPressed()
     auto *footer = new QWidget(&menu);
     footer->setObjectName(QStringLiteral("historyFooter"));
     auto *footerLayout = new QHBoxLayout(footer);
-    footerLayout->setContentsMargins(4, 2, 4, 4);
+    footerLayout->setContentsMargins(12, 4, 12, 6);
     footerLayout->addStretch(1);
     auto *clearAll = new QPushButton(_("Clear history…"), footer);
     clearAll->setObjectName(QStringLiteral("historyClearButton"));
@@ -1464,13 +1464,12 @@ void ChatWidget::restoreExpandedChrome()
     layoutButton->setToolTip(_("Hide AI chat"));
   }
   if (headerWidget) {
-    headerWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
-    headerWidget->setMinimumSize(0, 0);
-    headerWidget->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
-    headerWidget->setStyleSheet(QString());
+    headerWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    headerWidget->setFixedHeight(32);
+    headerWidget->setAttribute(Qt::WA_StyledBackground, true);
   }
   if (headerLayout) {
-    headerLayout->setContentsMargins(8, 4, 6, 0);
+    headerLayout->setContentsMargins(8, 0, 6, 0);
     headerLayout->setSpacing(2);
     for (int i = 0; i < headerLayout->count(); ++i) {
       if (QSpacerItem *spacer = headerLayout->itemAt(i)->spacerItem()) {
@@ -1623,8 +1622,10 @@ void ChatWidget::setupCursorHeader()
     delete item;
   }
 
-  headerLayout->setContentsMargins(8, 4, 6, 0);
+  headerLayout->setContentsMargins(8, 0, 6, 0);
   headerLayout->setSpacing(2);
+  headerWidget->setFixedHeight(32);
+  headerWidget->setAttribute(Qt::WA_StyledBackground, true);
 
   // Single persistent chat — no tab strip / close / new-chat controls
   titleLabel->setParent(headerWidget);
@@ -1829,7 +1830,8 @@ void ChatWidget::applyVSCodeChrome()
       QWidget#headerWidget {
         background-color: #252526;
         border-bottom: 1px solid #2b2b2b;
-        min-height: 36px;
+        min-height: 32px;
+        max-height: 32px;
       }
       QLabel#titleLabel {
         color: #cccccc;
@@ -1911,7 +1913,8 @@ void ChatWidget::applyVSCodeChrome()
       QWidget#headerWidget {
         background-color: #f3f3f3;
         border-bottom: 1px solid #e5e5e5;
-        min-height: 36px;
+        min-height: 32px;
+        max-height: 32px;
       }
       QLabel#titleLabel {
         color: #1e1e1e;

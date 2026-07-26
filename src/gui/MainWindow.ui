@@ -371,7 +371,6 @@
     <addaction name="viewActionPerspective"/>
     <addaction name="viewActionOrthogonal"/>
     <addaction name="separator"/>
-    <addaction name="viewActionHideEditorToolBar"/>
     <addaction name="viewActionHide3DViewToolBar"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
@@ -427,6 +426,9 @@
      </property>
      <item>
       <widget class="QToolBar" name="editortoolbar">
+       <property name="visible">
+        <bool>false</bool>
+       </property>
        <property name="iconSize">
         <size>
          <width>16</width>

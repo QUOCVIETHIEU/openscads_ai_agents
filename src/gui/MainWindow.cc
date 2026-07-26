@@ -76,6 +76,8 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QStyle>
+#include <QStyleFactory>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -541,6 +543,15 @@ void MainWindow::loadViewSettings()
     viewActionShowScaleProportional->setChecked(true);
   }
   viewTogglePerspective();
+
+  // Editor toolbar (New/Open/Save/Undo/…) is intentionally removed from the UI —
+  // those actions stay available via the File / Edit / Design menus.
+  if (this->editortoolbar) {
+    this->editortoolbar->hide();
+  }
+  if (this->viewActionHideEditorToolBar) {
+    this->viewActionHideEditorToolBar->setVisible(false);
+  }
 
   updateUndockMode(GlobalPreferences::inst()->getValue("advanced/undockableWindows").toBool());
   updateReorderMode(GlobalPreferences::inst()->getValue("advanced/reorderWindows").toBool());
@@ -3310,13 +3321,9 @@ void MainWindow::on_viewActionPan_toggled(bool checked)
 
 void MainWindow::on_viewActionHideEditorToolBar_toggled(bool checked)
 {
-  QSettingsCached settings;
-  settings.setValue("view/hideEditorToolbar", checked);
-  if (checked) {
-    editortoolbar->hide();
-  } else {
-    editortoolbar->show();
-  }
+  Q_UNUSED(checked);
+  // Editor toolbar is permanently hidden; File/Edit/Design menus replace it.
+  if (this->editortoolbar) this->editortoolbar->hide();
 }
 
 void MainWindow::on_viewActionHide3DViewToolBar_toggled(bool checked)
@@ -4565,10 +4572,12 @@ void MainWindow::applyFlatWorkbenchChrome()
       background: %4;
       color: %6;
       border: none;
-      border-top: 1px solid %1;
       border-bottom: 1px solid %1;
-      padding: 5px 10px;
+      padding: 0px 10px;
+      min-height: 32px;
+      max-height: 32px;
       font-size: 12px;
+      font-weight: 500;
     }
     QDockWidget > QWidget {
       background: transparent;
@@ -4606,13 +4615,47 @@ void MainWindow::applyFlatWorkbenchChrome()
       border: none;
       spacing: 2px;
     }
+    QWidget#previewHeaderRow {
+      background: %4;
+      border: none;
+      border-bottom: 1px solid %1;
+      min-height: 32px;
+      max-height: 32px;
+    }
+    QToolBar#viewerToolBar {
+      background: %4;
+      border: none;
+      spacing: 1px;
+      padding: 2px 4px;
+      min-height: 32px;
+      max-height: 32px;
+    }
+    QToolBar#viewerToolBar::separator {
+      background: %1;
+      width: 1px;
+      margin: 6px 4px;
+    }
+    QToolBar#viewerToolBar QToolButton {
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      padding: 3px;
+      margin: 0px;
+    }
+    QToolBar#viewerToolBar QToolButton:hover {
+      background: %8;
+    }
+    QToolBar#viewerToolBar QToolButton:pressed,
+    QToolBar#viewerToolBar QToolButton:checked {
+      background: %7;
+    }
     QStatusBar {
       background: %3;
       border: none;
       border-top: 1px solid %1;
-      min-height: 20px;
-      max-height: 22px;
-      padding: 0px 6px;
+      min-height: 22px;
+      max-height: 24px;
+      padding: 0px 14px;
       font-size: 11px;
       font-weight: normal;
       color: %6;
@@ -4621,11 +4664,12 @@ void MainWindow::applyFlatWorkbenchChrome()
       font-size: 11px;
       font-weight: normal;
       color: %6;
-      padding: 0px;
+      padding: 0px 6px;
       margin: 0px;
     }
     QStatusBar::item {
       border: none;
+      margin: 0px 2px;
     }
     QFrame#find_panel {
       background: %4;
@@ -4702,9 +4746,23 @@ void MainWindow::applyFlatWorkbenchChrome()
                   .arg(sep, sepHover, panelBg, headerBg,
                        dark ? QStringLiteral("#264f78") : QStringLiteral("#add6ff"),
                        dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333"),
-                       dark ? QStringLiteral("#094771") : QStringLiteral("#e8e8e8")));
+                       dark ? QStringLiteral("#094771") : QStringLiteral("#e8e8e8"),
+                       dark ? QStringLiteral("#2a2d2e") : QStringLiteral("#e8e8e8")));
 
-  // Compact find strip margins + readable combo popup (macOS selection contrast)
+  // Kill macOS Aqua bevel on the preview toolbar so it matches the flat chat header.
+  if (this->viewerToolBar) {
+    this->viewerToolBar->setAttribute(Qt::WA_StyledBackground, true);
+    this->viewerToolBar->setMovable(false);
+    this->viewerToolBar->setFloatable(false);
+    static QStyle *fusionToolbarStyle = QStyleFactory::create(QStringLiteral("Fusion"));
+    if (fusionToolbarStyle) {
+      this->viewerToolBar->setStyle(fusionToolbarStyle);
+    }
+  }
+  if (this->previewHeaderRow) {
+    this->previewHeaderRow->setAttribute(Qt::WA_StyledBackground, true);
+    this->previewHeaderRow->setFixedHeight(32);
+  }
   if (auto *grid = find_panel ? qobject_cast<QGridLayout *>(find_panel->layout()) : nullptr) {
     grid->setContentsMargins(6, 4, 6, 4);
     grid->setHorizontalSpacing(4);
