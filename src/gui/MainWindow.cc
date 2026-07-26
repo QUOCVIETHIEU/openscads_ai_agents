@@ -274,55 +274,14 @@ void removeExportActions(QToolBar *toolbar, QAction *action)
 constexpr int kEditorActivityBarW = 32;
 constexpr int kWorkbenchHeaderH = 32;
 
-QIcon paintActivityIcon(const QColor& color, const std::function<void(QPainter&, int)>& paint)
+QIcon projectActivityIcon()
 {
-  QIcon icon;
-  for (qreal dpr : {1.0, 2.0, 3.0}) {
-    const int logical = 16;
-    const int px = qMax(1, qRound(logical * dpr));
-    QPixmap pm(px, px);
-    pm.fill(Qt::transparent);
-    pm.setDevicePixelRatio(dpr);
-    QPainter p(&pm);
-    p.setRenderHint(QPainter::Antialiasing, true);
-    p.setPen(QPen(color, 1.15, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    p.setBrush(Qt::NoBrush);
-    paint(p, logical);
-    p.end();
-    icon.addPixmap(pm);
-  }
-  return icon;
+  return QIcon::fromTheme(QStringLiteral("ico_folder"));
 }
 
-QIcon projectActivityIcon(bool dark)
+QIcon editorActivityIcon()
 {
-  const QColor c = dark ? QColor("#c5c5c5") : QColor("#424242");
-  return paintActivityIcon(c, [](QPainter& p, int s) {
-    // Compact folder outline (matches editor stroke weight)
-    const QRectF body(s * 0.16, s * 0.36, s * 0.68, s * 0.46);
-    p.drawRoundedRect(body, 1.2, 1.2);
-    QPainterPath tab;
-    tab.moveTo(s * 0.16, s * 0.40);
-    tab.lineTo(s * 0.16, s * 0.28);
-    tab.lineTo(s * 0.40, s * 0.28);
-    tab.lineTo(s * 0.48, s * 0.36);
-    p.drawPath(tab);
-  });
-}
-
-QIcon editorActivityIcon(bool dark)
-{
-  const QColor c = dark ? QColor("#c5c5c5") : QColor("#424242");
-  return paintActivityIcon(c, [](QPainter& p, int s) {
-    // Compact code-file outline — same stroke language as folder
-    const QRectF page(s * 0.26, s * 0.14, s * 0.48, s * 0.72);
-    p.drawRoundedRect(page, 1.2, 1.2);
-    p.drawLine(QPointF(s * 0.50, s * 0.14), QPointF(s * 0.74, s * 0.38));
-    p.drawLine(QPointF(s * 0.50, s * 0.14), QPointF(s * 0.50, s * 0.38));
-    p.drawLine(QPointF(s * 0.50, s * 0.38), QPointF(s * 0.74, s * 0.38));
-    p.drawLine(QPointF(s * 0.36, s * 0.54), QPointF(s * 0.64, s * 0.54));
-    p.drawLine(QPointF(s * 0.36, s * 0.66), QPointF(s * 0.58, s * 0.66));
-  });
+  return QIcon::fromTheme(QStringLiteral("ico_editor"));
 }
 
 std::unique_ptr<ExternalToolInterface> createExternalToolService(print_service_t serviceType,
@@ -4511,9 +4470,8 @@ void MainWindow::setupEditor(const QStringList& filenames)
     btn->setFixedSize(kEditorActivityBarW, kEditorActivityBarW);
     return btn;
   };
-  const bool dark = isDarkMode();
-  this->projectViewTabBtn = makeActivityBtn(_("Project"), projectActivityIcon(dark));
-  this->editorViewTabBtn = makeActivityBtn(_("Editor"), editorActivityIcon(dark));
+  this->projectViewTabBtn = makeActivityBtn(_("Project"), projectActivityIcon());
+  this->editorViewTabBtn = makeActivityBtn(_("Editor"), editorActivityIcon());
   activityLayout->addWidget(this->projectViewTabBtn, 0, Qt::AlignHCenter);
   activityLayout->addWidget(this->editorViewTabBtn, 0, Qt::AlignHCenter);
   activityLayout->addStretch(1);
@@ -5239,12 +5197,12 @@ void MainWindow::applyFlatWorkbenchChrome()
       )")
         .arg(barBg, hover, accent));
     if (this->projectViewTabBtn) {
-      this->projectViewTabBtn->setIcon(projectActivityIcon(dark));
+      this->projectViewTabBtn->setIcon(projectActivityIcon());
       this->projectViewTabBtn->setIconSize(QSize(16, 16));
       this->projectViewTabBtn->setFixedSize(kEditorActivityBarW, kEditorActivityBarW);
     }
     if (this->editorViewTabBtn) {
-      this->editorViewTabBtn->setIcon(editorActivityIcon(dark));
+      this->editorViewTabBtn->setIcon(editorActivityIcon());
       this->editorViewTabBtn->setIconSize(QSize(16, 16));
       this->editorViewTabBtn->setFixedSize(kEditorActivityBarW, kEditorActivityBarW);
     }

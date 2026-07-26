@@ -1,4 +1,5 @@
 #include "gui/project/ProjectExplorer.h"
+#include "gui/project/ProjectFileIconProvider.h"
 #include "gui/project/ProjectManager.h"
 #include "gui/qtgettext.h"
 #include "openscad_gui.h"
@@ -98,6 +99,9 @@ ProjectExplorer::ProjectExplorer(QWidget *parent) : QWidget(parent)
   model_ = new QFileSystemModel(this);
   model_->setFilter(QDir::AllDirs | QDir::Files | QDir::NoDotAndDotDot);
   model_->setReadOnly(false);
+  iconProvider_ = new ProjectFileIconProvider();
+  iconProvider_->setDarkMode(isDarkMode());
+  model_->setIconProvider(iconProvider_);
 
   tree_ = new QTreeView(treePage_);
   tree_->setObjectName(QStringLiteral("projectExplorerTree"));
@@ -105,6 +109,8 @@ ProjectExplorer::ProjectExplorer(QWidget *parent) : QWidget(parent)
   tree_->setHeaderHidden(true);
   tree_->setAnimated(false);
   tree_->setIndentation(14);
+  tree_->setIconSize(QSize(16, 16));
+  tree_->setUniformRowHeights(true);
   tree_->setContextMenuPolicy(Qt::CustomContextMenu);
   tree_->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
   // Hide size/type/date columns
@@ -128,6 +134,13 @@ ProjectExplorer::ProjectExplorer(QWidget *parent) : QWidget(parent)
 void ProjectExplorer::refreshTheme()
 {
   const bool dark = isDarkMode();
+  if (iconProvider_) iconProvider_->setDarkMode(dark);
+  // Force the tree to re-query icons after theme change.
+  if (tree_ && model_ && ProjectManager::instance().hasProject()) {
+    const QString root = ProjectManager::instance().rootPath();
+    const QModelIndex rootIndex = model_->setRootPath(root);
+    tree_->setRootIndex(rootIndex);
+  }
   setStyleSheet(QStringLiteral(R"(
     QWidget#projectExplorer {
       background: %1;

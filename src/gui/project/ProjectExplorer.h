@@ -9,6 +9,7 @@ class QLabel;
 class QPushButton;
 class QStackedWidget;
 class QModelIndex;
+class ProjectFileIconProvider;
 
 class ProjectExplorer : public QWidget
 {
@@ -46,6 +47,7 @@ private:
   QLabel *titleLabel_ = nullptr;
   QTreeView *tree_ = nullptr;
   QFileSystemModel *model_ = nullptr;
+  ProjectFileIconProvider *iconProvider_ = nullptr;
   QPushButton *collapseBtn_ = nullptr;
   bool collapsed_ = false;
   int expandedWidth_ = 220;
