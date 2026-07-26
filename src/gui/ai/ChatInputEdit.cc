@@ -13,8 +13,8 @@ ChatInputEdit::ChatInputEdit(QWidget *parent) : QPlainTextEdit(parent)
   setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   setTabChangesFocus(false);
   document()->setDocumentMargin(0);
-  setMinimumHeight(28);
-  setMaximumHeight(80);
+  setMinimumHeight(40);
+  setMaximumHeight(96);
 }
 
 void ChatInputEdit::keyPressEvent(QKeyEvent *event)

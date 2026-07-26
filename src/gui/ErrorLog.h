@@ -25,6 +25,7 @@ public:
   ErrorLog& operator=(ErrorLog&& source) = delete;
   ~ErrorLog() override = default;
   void initGUI();
+  void applyTheme();
   void toErrorLog(const Message& logMsg);
   void showtheErrorInGUI(const Message& logMsg);
   void clearModel();

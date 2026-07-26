@@ -4286,22 +4286,29 @@ void MainWindow::setupConsole()
   QObject::connect(consoleDock, &Dock::visibilityChanged, this,
                    &MainWindow::onConsoleDockVisibilityChanged);
 
-  // Prefer a compact, light terminal face (one-shot migrate prior 12pt default → 11)
+  // Prefer Explorer-matching console type (12px UI sans). One-shot migrate off terminal mono.
   {
     QSettingsCached settings;
     uint consoleSize = GlobalPreferences::inst()->getValue("advanced/consoleFontSize").toUInt();
-    if (!settings.value("advanced/consoleFontCompacted", false).toBool()) {
-      if (consoleSize == 0 || consoleSize == 12) {
-        consoleSize = 11;
+    QString consoleFamily =
+      GlobalPreferences::inst()->getValue("advanced/consoleFontFamily").toString();
+    if (!settings.value("advanced/consoleFontExplorerUi", false).toBool()) {
+      if (consoleSize == 0 || consoleSize == 11) {
+        consoleSize = 12;
         settings.setValue("advanced/consoleFontSize", consoleSize);
       }
-      settings.setValue("advanced/consoleFontCompacted", true);
+      // Drop leftover mono faces so Console matches Explorer.
+      const QFontInfo info{QFont(consoleFamily)};
+      if (consoleFamily.isEmpty() || info.fixedPitch()) {
+        consoleFamily = QFontInfo{QApplication::font()}.family();
+        settings.setValue("advanced/consoleFontFamily", consoleFamily);
+      }
+      settings.setValue("advanced/consoleFontExplorerUi", true);
     }
     if (consoleSize == 0) {
-      consoleSize = 11;
+      consoleSize = 12;
     }
-    this->console->setConsoleFont(
-      GlobalPreferences::inst()->getValue("advanced/consoleFontFamily").toString(), consoleSize);
+    this->console->setConsoleFont(consoleFamily, consoleSize);
   }
 }
 
@@ -5162,6 +5169,9 @@ void MainWindow::applyFlatWorkbenchChrome()
   }
   if (this->bottomPanelHeader) {
     this->bottomPanelHeader->applyTheme();
+  }
+  if (this->errorLogWidget) {
+    this->errorLogWidget->applyTheme();
   }
   if (this->projectExplorer) {
     this->projectExplorer->refreshTheme();

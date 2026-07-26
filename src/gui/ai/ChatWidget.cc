@@ -217,8 +217,8 @@ MessageBubble::MessageBubble(const QString& text, bool isUser, QWidget *parent) 
   userMessage(isUser)
 {
   QVBoxLayout *outer = new QVBoxLayout(this);
-  outer->setContentsMargins(0, 8, 0, 8);
-  outer->setSpacing(6);
+  outer->setContentsMargins(0, 6, 0, 6);
+  outer->setSpacing(4);
 
   bool dark = isDarkTheme();
 
@@ -228,8 +228,10 @@ MessageBubble::MessageBubble(const QString& text, bool isUser, QWidget *parent) 
   headerLayout->setSpacing(4);
 
   QLabel *roleLabel = new QLabel(isUser ? _("You") : _("Cad Agent"), header);
-  roleLabel->setStyleSheet(dark ? "QLabel { color: #cccccc; font-size: 12px; font-weight: 600; }"
-                                : "QLabel { color: #616161; font-size: 12px; font-weight: 600; }");
+  roleLabel->setObjectName(QStringLiteral("messageRoleLabel"));
+  roleLabel->setStyleSheet(
+    dark ? "QLabel { color: #cccccc; font-size: 11px; font-weight: 700; letter-spacing: 0.4px; }"
+         : "QLabel { color: #333333; font-size: 11px; font-weight: 700; letter-spacing: 0.4px; }");
   headerLayout->addWidget(roleLabel, 1);
 
   if (isUser) {
@@ -299,19 +301,19 @@ MessageBubble::MessageBubble(const QString& text, bool isUser, QWidget *parent) 
     toolsPanel->setObjectName(QStringLiteral("toolsPanel"));
     toolsPanel->setFrameShape(QFrame::NoFrame);
     toolsPanel->setStyleSheet(
-      dark ? "#toolsPanel { background-color: #252526; border: 1px solid #3c3c3c; "
-             "border-radius: 10px; }"
+      dark ? "#toolsPanel { background-color: #252526; border: 1px solid #2b2b2b; "
+             "border-radius: 4px; }"
            : "#toolsPanel { background-color: #f3f3f3; border: 1px solid #e5e5e5; "
-             "border-radius: 10px; }");
+             "border-radius: 4px; }");
     QVBoxLayout *toolsLayout = new QVBoxLayout(toolsPanel);
-    toolsLayout->setContentsMargins(14, 12, 14, 12);
-    toolsLayout->setSpacing(8);
+    toolsLayout->setContentsMargins(12, 10, 12, 10);
+    toolsLayout->setSpacing(6);
 
     QLabel *toolsTitle = new QLabel(_("Used tools"), toolsPanel);
     toolsTitle->setStyleSheet(
-      dark ? "QLabel { color: #9cdcfe; font-size: 12px; font-weight: 600; "
+      dark ? "QLabel { color: #cccccc; font-size: 11px; font-weight: 700; letter-spacing: 0.4px; "
              "background: transparent; border: none; }"
-           : "QLabel { color: #0451a5; font-size: 12px; font-weight: 600; "
+           : "QLabel { color: #333333; font-size: 11px; font-weight: 700; letter-spacing: 0.4px; "
              "background: transparent; border: none; }");
     toolsDetailLabel = new QLabel(toolsPanel);
     toolsDetailLabel->setWordWrap(true);
@@ -343,31 +345,31 @@ MessageBubble::MessageBubble(const QString& text, bool isUser, QWidget *parent) 
   QString frameStyle;
   QString labelStyle;
   if (isUser) {
-    // VS Code chat user request — soft fill, no hard “input box” border
+    // Soft chip matching Explorer hover/selected surfaces — no hard border
     if (dark) {
-      frameStyle = "QFrame { background-color: #2b2d2e; border: none; border-radius: 8px; }";
+      frameStyle = "QFrame { background-color: #2a2d2e; border: none; border-radius: 4px; }";
       labelStyle =
-        "QLabel { color: #e3e3e3; font-size: 13px; background: transparent; padding: 0px; }";
+        "QLabel { color: #cccccc; font-size: 12px; background: transparent; padding: 0px; }";
     } else {
-      frameStyle = "QFrame { background-color: #ebebeb; border: none; border-radius: 8px; }";
+      frameStyle = "QFrame { background-color: #e8e8e8; border: none; border-radius: 4px; }";
       labelStyle =
-        "QLabel { color: #1f1f1f; font-size: 13px; background: transparent; padding: 0px; }";
+        "QLabel { color: #333333; font-size: 12px; background: transparent; padding: 0px; }";
     }
   } else {
-    // Assistant — flat prose, no bubble chrome
+    // Assistant — flat prose aligned with Explorer tree text
     if (dark) {
       frameStyle = "QFrame { background-color: transparent; border: none; border-radius: 0px; }";
-      labelStyle = "QLabel { color: #cccccc; font-size: 13px; background: transparent; }";
+      labelStyle = "QLabel { color: #cccccc; font-size: 12px; background: transparent; }";
     } else {
       frameStyle = "QFrame { background-color: transparent; border: none; border-radius: 0px; }";
-      labelStyle = "QLabel { color: #1f1f1f; font-size: 13px; background: transparent; }";
+      labelStyle = "QLabel { color: #333333; font-size: 12px; background: transparent; }";
     }
   }
 
   bubbleFrame->setStyleSheet(frameStyle);
 
   QVBoxLayout *frameLayout = new QVBoxLayout(bubbleFrame);
-  frameLayout->setContentsMargins(isUser ? 12 : 0, isUser ? 10 : 0, isUser ? 12 : 0, isUser ? 10 : 0);
+  frameLayout->setContentsMargins(isUser ? 10 : 0, isUser ? 8 : 0, isUser ? 10 : 0, isUser ? 8 : 0);
   frameLayout->setSpacing(0);
 
   this->label = new QLabel(bubbleFrame);
@@ -483,10 +485,10 @@ void MessageBubble::updateToolsPanel()
   if (!toolsDetailLabel) return;
 
   const bool dark = isDarkTheme();
-  const QString titleColor = dark ? QStringLiteral("#e3e3e3") : QStringLiteral("#1f1f1f");
-  const QString metaColor = dark ? QStringLiteral("#9cdcfe") : QStringLiteral("#0451a5");
-  const QString bodyColor = dark ? QStringLiteral("#d4d4d4") : QStringLiteral("#333333");
-  const QString divider = dark ? QStringLiteral("#3c3c3c") : QStringLiteral("#e5e5e5");
+  const QString titleColor = dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333");
+  const QString metaColor = dark ? QStringLiteral("#969696") : QStringLiteral("#6e6e6e");
+  const QString bodyColor = dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333");
+  const QString divider = dark ? QStringLiteral("#2b2b2b") : QStringLiteral("#e5e5e5");
 
   QString html;
   for (size_t i = 0; i < toolCalls.size(); ++i) {
@@ -509,7 +511,7 @@ void MessageBubble::updateToolsPanel()
 
     html += QStringLiteral(
       "<div style='margin:0;'>"
-      "<div style='font-size:13px; font-weight:600; color:%1; line-height:1.35;'>%2</div>")
+      "<div style='font-size:12px; font-weight:700; color:%1; line-height:1.35;'>%2</div>")
               .arg(titleColor, summary);
     if (!toolLine.isEmpty()) {
       html += QStringLiteral(
@@ -602,6 +604,8 @@ ChatWidget::ChatWidget(QWidget *parent) : QWidget(parent)
     OpenSCADAiBridge::instance().setDesiredPort(0);
     OpenSCADAiBridge::instance().start();
   }
+  // Composer built the badge before the bridge started — refresh live state now.
+  updateMcpBadge();
 
   // Start with an empty chat — no welcome greeting.
 
@@ -1551,7 +1555,7 @@ void ChatWidget::restoreExpandedChrome()
     headerWidget->setAttribute(Qt::WA_StyledBackground, true);
   }
   if (headerLayout) {
-    headerLayout->setContentsMargins(8, 0, 6, 0);
+    headerLayout->setContentsMargins(12, 0, 8, 0);
     headerLayout->setSpacing(2);
     for (int i = 0; i < headerLayout->count(); ++i) {
       if (QSpacerItem *spacer = headerLayout->itemAt(i)->spacerItem()) {
@@ -1704,17 +1708,17 @@ void ChatWidget::setupCursorHeader()
     delete item;
   }
 
-  headerLayout->setContentsMargins(8, 0, 6, 1);
+  headerLayout->setContentsMargins(12, 0, 8, 1);
   headerLayout->setSpacing(2);
   headerWidget->setFixedHeight(32);
   headerWidget->setAttribute(Qt::WA_StyledBackground, true);
 
-  // Single persistent chat — no tab strip / close / new-chat controls
+  // Match Project Explorer header typography (uppercase, compact tracking)
   titleLabel->setParent(headerWidget);
   if (ProjectManager::instance().hasProject()) {
-    titleLabel->setText(tr("Chat · %1").arg(ProjectManager::instance().projectName()));
+    titleLabel->setText(tr("CHAT · %1").arg(ProjectManager::instance().projectName().toUpper()));
   } else {
-    titleLabel->setText(_("Chat"));
+    titleLabel->setText(_("CHAT"));
   }
   titleLabel->setObjectName("titleLabel");
   headerLayout->addWidget(titleLabel, 0);
@@ -1746,13 +1750,13 @@ void ChatWidget::setupCursorComposer()
     delete item;
   }
 
-  inputLayout->setContentsMargins(12, 8, 12, 8);
+  inputLayout->setContentsMargins(10, 8, 10, 10);
   inputLayout->setSpacing(0);
 
   QFrame *composer = new QFrame(inputWidget);
   composer->setObjectName("composerCard");
   auto *composerLayout = new QVBoxLayout(composer);
-  composerLayout->setContentsMargins(10, 6, 10, 6);
+  composerLayout->setContentsMargins(6, 6, 6, 6);
   composerLayout->setSpacing(4);
 
   attachmentStrip = new QWidget(composer);
@@ -1765,8 +1769,8 @@ void ChatWidget::setupCursorComposer()
 
   inputField->setParent(composer);
   inputField->setPlaceholderText(_("Describe the model you want to build…"));
-  inputField->setMaximumHeight(80);
-  inputField->setMinimumHeight(28);
+  inputField->setMaximumHeight(96);
+  inputField->setMinimumHeight(40);
   composerLayout->addWidget(inputField);
 
   auto *toolbar = new QWidget(composer);
@@ -1866,20 +1870,21 @@ void ChatWidget::updateMcpBadge()
 
   mcpBadge->setStyleSheet(QStringLiteral(R"(
     QPushButton#mcpBadge {
-      border: none;
-      border-radius: 10px;
-      padding: 0px 9px 0px 7px;
+      border: 1px solid %4;
+      border-radius: 4px;
+      padding: 0px 8px 0px 6px;
       color: %1;
       font-size: 10px;
       font-weight: 700;
-      letter-spacing: 0.6px;
+      letter-spacing: 0.5px;
       background: %2;
       text-align: center;
     }
     QPushButton#mcpBadge:hover { background: %3; }
     QPushButton#mcpBadge:pressed { padding-top: 1px; }
   )")
-                            .arg(text, bg, hover));
+                            .arg(text, bg, hover,
+                                 dark ? QStringLiteral("#2b2b2b") : QStringLiteral("#e5e5e5")));
 }
 
 bool ChatWidget::isDarkTheme() const
@@ -1890,10 +1895,19 @@ bool ChatWidget::isDarkTheme() const
 void ChatWidget::applyVSCodeChrome()
 {
   const bool dark = isDarkTheme();
+  // Keep tokens identical to ProjectExplorer::refreshTheme
+  const QString bg = dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8");
+  const QString border = dark ? QStringLiteral("#2b2b2b") : QStringLiteral("#e5e5e5");
+  const QString header = dark ? QStringLiteral("#252526") : QStringLiteral("#f3f3f3");
+  const QString text = dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333");
+  const QString muted = dark ? QStringLiteral("#969696") : QStringLiteral("#6e6e6e");
+  const QString hover = dark ? QStringLiteral("#2a2d2e") : QStringLiteral("#e8e8e8");
+  const QString selected = dark ? QStringLiteral("#094771") : QStringLiteral("#e8f1ff");
+
   mainLayout->setContentsMargins(0, 0, 0, 0);
   mainLayout->setSpacing(0);
   scrollLayout->setContentsMargins(12, 8, 12, 8);
-  scrollLayout->setSpacing(4);
+  scrollLayout->setSpacing(2);
 
   if (attachButton) {
     attachButton->setIcon(QIcon::fromTheme(QStringLiteral("chokusen-paper-clip")));
@@ -1908,173 +1922,98 @@ void ChatWidget::applyVSCodeChrome()
   updateMcpBadge();
   updateComposerActionButton();
 
-  if (dark) {
-    setStyleSheet(QStringLiteral(R"(
-      ChatWidget, QWidget#ChatWidget {
-        background-color: #1e1e1e;
-      }
-      QWidget#headerWidget {
-        background-color: #252526;
-        border-bottom: 1px solid #2b2b2b;
-        min-height: 32px;
-        max-height: 32px;
-      }
-      QLabel#titleLabel {
-        color: #cccccc;
-        font-size: 13px;
-        font-weight: 500;
-        padding-left: 4px;
-      }
-      QPushButton#headerHistoryButton, QPushButton#headerClearButton,
-      QPushButton#headerLayoutButton {
-        background: transparent;
-        border: none;
-        border-radius: 4px;
-      }
-      QPushButton#headerHistoryButton:hover, QPushButton#headerClearButton:hover,
-      QPushButton#headerLayoutButton:hover {
-        background: #2a2d2e;
-      }
-      QScrollArea {
-        background: #1e1e1e;
-        border: none;
-      }
-      QWidget#scrollAreaWidgetContents {
-        background: #1e1e1e;
-      }
-      QWidget#inputWidget {
-        background-color: #1e1e1e;
-        border-top: none;
-      }
-      QFrame#composerCard {
-        background: #1e1e1e;
-        border: 1px solid #3c3c3c;
-        border-radius: 12px;
-      }
-      QFrame#attachmentChip {
-        background: #2a2d2e;
-        border: 1px solid #3c3c3c;
-        border-radius: 8px;
-      }
-      ChatInputEdit, QPlainTextEdit#inputField {
-        background: transparent;
-        color: #cccccc;
-        border: none;
-        padding: 2px 0px;
-        font-size: 13px;
-        selection-background-color: #264f78;
-      }
-      QPushButton#attachButton, QPushButton#sendButton {
-        background: transparent;
-        border: none;
-        border-radius: 11px;
-        padding: 0px;
-      }
-      QPushButton#attachButton:hover, QPushButton#sendButton:hover {
-        background: #2a2d2e;
-      }
-      QPushButton#agentButton {
-        background: transparent;
-        border: none;
-        border-radius: 8px;
-        color: #c8c8c8;
-        font-size: 11.5px;
-        font-weight: 400;
-        padding: 4px 8px 4px 6px;
-        text-align: left;
-      }
-      QPushButton#agentButton:hover, QPushButton#agentButton:pressed {
-        background: #2a2d2e;
-      }
-      QPushButton#agentButton::menu-indicator {
-        image: none;
-        width: 0px;
-      }
-    )"));
-  } else {
-    setStyleSheet(QStringLiteral(R"(
-      ChatWidget, QWidget#ChatWidget {
-        background-color: #f8f8f8;
-      }
-      QWidget#headerWidget {
-        background-color: #f3f3f3;
-        border-bottom: 1px solid #e5e5e5;
-        min-height: 32px;
-        max-height: 32px;
-      }
-      QLabel#titleLabel {
-        color: #1e1e1e;
-        font-size: 13px;
-        font-weight: 500;
-        padding-left: 4px;
-      }
-      QPushButton#headerHistoryButton, QPushButton#headerClearButton,
-      QPushButton#headerLayoutButton {
-        background: transparent;
-        border: none;
-        border-radius: 4px;
-      }
-      QPushButton#headerHistoryButton:hover, QPushButton#headerClearButton:hover,
-      QPushButton#headerLayoutButton:hover {
-        background: #e8e8e8;
-      }
-      QScrollArea {
-        background: #f8f8f8;
-        border: none;
-      }
-      QWidget#scrollAreaWidgetContents {
-        background: #f8f8f8;
-      }
-      QWidget#inputWidget {
-        background-color: #f8f8f8;
-        border-top: none;
-      }
-      QFrame#composerCard {
-        background: #f8f8f8;
-        border: 1px solid #e0e0e0;
-        border-radius: 12px;
-      }
-      QFrame#attachmentChip {
-        background: #ffffff;
-        border: 1px solid #e0e0e0;
-        border-radius: 8px;
-      }
-      ChatInputEdit, QPlainTextEdit#inputField {
-        background: transparent;
-        color: #1e1e1e;
-        border: none;
-        padding: 2px 0px;
-        font-size: 13px;
-        selection-background-color: #add6ff;
-      }
-      QPushButton#attachButton, QPushButton#sendButton {
-        background: transparent;
-        border: none;
-        border-radius: 11px;
-        padding: 0px;
-      }
-      QPushButton#attachButton:hover, QPushButton#sendButton:hover {
-        background: #f0f0f0;
-      }
-      QPushButton#agentButton {
-        background: transparent;
-        border: none;
-        border-radius: 8px;
-        color: #3a3a3a;
-        font-size: 11.5px;
-        font-weight: 400;
-        padding: 4px 8px 4px 6px;
-        text-align: left;
-      }
-      QPushButton#agentButton:hover, QPushButton#agentButton:pressed {
-        background: #ececec;
-      }
-      QPushButton#agentButton::menu-indicator {
-        image: none;
-        width: 0px;
-      }
-    )"));
-  }
+  setStyleSheet(QStringLiteral(R"(
+    ChatWidget, QWidget#ChatWidget {
+      background-color: %1;
+      border: none;
+    }
+    QWidget#headerWidget {
+      background-color: %3;
+      border: none;
+      border-bottom: 1px solid %2;
+      min-height: 32px;
+      max-height: 32px;
+      padding: 0px;
+    }
+    QLabel#titleLabel {
+      color: %4;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      padding: 0px;
+      margin: 0px;
+    }
+    QPushButton#headerHistoryButton, QPushButton#headerClearButton,
+    QPushButton#headerLayoutButton {
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      color: %5;
+    }
+    QPushButton#headerHistoryButton:hover, QPushButton#headerClearButton:hover,
+    QPushButton#headerLayoutButton:hover {
+      background: %6;
+      color: %4;
+    }
+    QScrollArea {
+      background: %1;
+      border: none;
+    }
+    QWidget#scrollAreaWidgetContents {
+      background: %1;
+    }
+    QWidget#inputWidget {
+      background-color: %1;
+      border-top: 1px solid %2;
+    }
+    QFrame#composerCard {
+      background: %1;
+      border: 1px solid %2;
+      border-radius: 4px;
+    }
+    QFrame#attachmentChip {
+      background: %3;
+      border: 1px solid %2;
+      border-radius: 4px;
+    }
+    ChatInputEdit, QPlainTextEdit#inputField {
+      background: transparent;
+      color: %4;
+      border: none;
+      padding: 2px 0px;
+      font-size: 12px;
+      selection-background-color: %7;
+    }
+    QPushButton#attachButton, QPushButton#sendButton {
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      padding: 0px;
+    }
+    QPushButton#attachButton:hover, QPushButton#sendButton:hover {
+      background: %6;
+    }
+    QPushButton#agentButton {
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      color: %5;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      padding: 3px 6px 3px 4px;
+      text-align: left;
+    }
+    QPushButton#agentButton:hover, QPushButton#agentButton:pressed {
+      background: %6;
+      color: %4;
+    }
+    QPushButton#agentButton::menu-indicator {
+      image: none;
+      width: 0px;
+    }
+  )")
+                  .arg(bg, border, header, text, muted, hover, selected));
 }
 
 void ChatWidget::applyCodeChange(const std::string& code)
@@ -2430,9 +2369,9 @@ void ChatWidget::onProjectChanged()
   // Refresh header title
   if (titleLabel) {
     if (ProjectManager::instance().hasProject()) {
-      titleLabel->setText(tr("Chat · %1").arg(ProjectManager::instance().projectName()));
+      titleLabel->setText(tr("CHAT · %1").arg(ProjectManager::instance().projectName().toUpper()));
     } else {
-      titleLabel->setText(_("Chat"));
+      titleLabel->setText(_("CHAT"));
     }
   }
 

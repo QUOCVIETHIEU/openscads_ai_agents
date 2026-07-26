@@ -38,14 +38,14 @@ QIcon paintIcon(int logicalSize, const std::function<void(QPainter&, int)>& pain
 BottomPanelHeader::BottomPanelHeader(QWidget *parent) : QWidget(parent)
 {
   setObjectName(QStringLiteral("bottomPanelHeader"));
-  setFixedHeight(35);
+  setFixedHeight(32);
 
   layout = new QHBoxLayout(this);
-  layout->setContentsMargins(8, 0, 6, 0);
+  layout->setContentsMargins(12, 0, 8, 0);
   layout->setSpacing(0);
 
-  consoleTab = makeTabButton(_("Console"));
-  errorLogTab = makeTabButton(_("Error Log"));
+  consoleTab = makeTabButton(_("CONSOLE"));
+  errorLogTab = makeTabButton(_("ERROR LOG"));
 
   errorBadge = new QLabel(this);
   errorBadge->setObjectName(QStringLiteral("bottomPanelBadge"));
@@ -200,10 +200,9 @@ void BottomPanelHeader::applyTheme()
 {
   dark = isDarkMode();
   const QString bg = dark ? QStringLiteral("#252526") : QStringLiteral("#f3f3f3");
-  const QString panel = dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8");
   const QString sep = dark ? QStringLiteral("#2b2b2b") : QStringLiteral("#e5e5e5");
   const QString muted = dark ? QStringLiteral("#969696") : QStringLiteral("#6e6e6e");
-  const QString fg = dark ? QStringLiteral("#ffffff") : QStringLiteral("#1e1e1e");
+  const QString fg = dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333");
   const QString hover = dark ? QStringLiteral("#2a2d2e") : QStringLiteral("#e8e8e8");
   const QString accent = dark ? QStringLiteral("#007acc") : QStringLiteral("#005fb8");
   const QString badgeBg = QStringLiteral("#007acc");
@@ -214,17 +213,21 @@ void BottomPanelHeader::applyTheme()
       border: none;
       border-top: 1px solid %2;
       border-bottom: 1px solid %2;
+      min-height: 32px;
+      max-height: 32px;
     }
     QToolButton {
       background: transparent;
       border: none;
       border-radius: 0px;
       color: %3;
-      font-size: 12px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
       padding: 0px 10px;
       margin: 0px;
-      min-height: 34px;
-      max-height: 34px;
+      min-height: 31px;
+      max-height: 31px;
     }
     QToolButton:hover {
       background: %4;
@@ -234,10 +237,7 @@ void BottomPanelHeader::applyTheme()
       color: %5;
       background: transparent;
       border-bottom: 1px solid %6;
-      font-weight: 600;
-    }
-    QToolButton#bottomPanelIconBtn, QToolButton {
-      /* icon buttons keep square hit area via fixed size */
+      font-weight: 700;
     }
     QLabel#bottomPanelBadge {
       background: %7;
@@ -252,16 +252,14 @@ void BottomPanelHeader::applyTheme()
   )")
                   .arg(bg, sep, muted, hover, fg, accent, badgeBg));
 
-  // Mark icon buttons so padding does not stretch them oddly
   for (QToolButton *b : {clearBtn, maximizeBtn, moreBtn, closeBtn}) {
     b->setStyleSheet(QStringLiteral(
-      "QToolButton { min-width: 28px; max-width: 28px; padding: 0px; margin: 0px 1px; }"
+      "QToolButton { min-width: 28px; max-width: 28px; padding: 0px; margin: 0px 1px;"
+      " font-weight: 400; letter-spacing: 0px; }"
       "QToolButton:hover { background: %1; border-radius: 4px; }"
       "QToolButton::menu-indicator { image: none; width: 0px; }")
                        .arg(hover));
   }
 
-  // Selected tab uses panel color continuity under the content
-  Q_UNUSED(panel);
   rebuildIcons();
 }

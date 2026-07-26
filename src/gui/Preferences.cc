@@ -171,9 +171,23 @@ Preferences::Preferences(QWidget *parent) : QMainWindow(parent)
 void Preferences::init()
 {
   // Editor pane
-  // Setup default font (Try to use a nice monospace font)
+  // Setup default font: VS Code-like editor fonts (SF Mono / Menlo on macOS,
+  // Cascadia / Consolas on Windows), falling back to the system fixed font.
   const QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-  const QString found_family{QFontInfo{font}.family()};
+  QString found_family{QFontInfo{font}.family()};
+#ifdef Q_OS_MACOS
+  if (QFontDatabase::hasFamily(QStringLiteral("SF Mono"))) {
+    found_family = QStringLiteral("SF Mono");
+  } else if (QFontDatabase::hasFamily(QStringLiteral("Menlo"))) {
+    found_family = QStringLiteral("Menlo");
+  }
+#elif defined(Q_OS_WIN)
+  if (QFontDatabase::hasFamily(QStringLiteral("Cascadia Code"))) {
+    found_family = QStringLiteral("Cascadia Code");
+  } else if (QFontDatabase::hasFamily(QStringLiteral("Consolas"))) {
+    found_family = QStringLiteral("Consolas");
+  }
+#endif
   this->defaultmap["editor/fontfamily"] = found_family;
   this->defaultmap["editor/fontsize"] = 12;
   this->defaultmap["editor/syntaxhighlight"] = "For Light Background";
@@ -182,25 +196,11 @@ void Preferences::init()
   this->defaultmap["advanced/applicationFontFamily"] = applicationFont.family();
   this->defaultmap["advanced/applicationFontSize"] = applicationFont.pointSize();
 
-  // Console: VS Code terminal defaults (SF Mono / Menlo on macOS), not UI proportional font
+  // Console: same proportional UI font as Project Explorer (not terminal mono)
   {
-    const QFont fixed = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-    QString consoleFamily = QFontInfo{fixed}.family();
-#ifdef Q_OS_MACOS
-    if (QFontDatabase::hasFamily(QStringLiteral("SF Mono"))) {
-      consoleFamily = QStringLiteral("SF Mono");
-    } else if (QFontDatabase::hasFamily(QStringLiteral("Menlo"))) {
-      consoleFamily = QStringLiteral("Menlo");
-    }
-#elif defined(Q_OS_WIN)
-    if (QFontDatabase::hasFamily(QStringLiteral("Cascadia Mono"))) {
-      consoleFamily = QStringLiteral("Cascadia Mono");
-    } else if (QFontDatabase::hasFamily(QStringLiteral("Consolas"))) {
-      consoleFamily = QStringLiteral("Consolas");
-    }
-#endif
+    const QString consoleFamily = QFontInfo{applicationFont}.family();
     this->defaultmap["advanced/consoleFontFamily"] = consoleFamily;
-    this->defaultmap["advanced/consoleFontSize"] = 11;
+    this->defaultmap["advanced/consoleFontSize"] = 12;
   }
 
   // Leave Customizer font with default if user has not chosen another.

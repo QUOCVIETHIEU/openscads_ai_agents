@@ -13,6 +13,8 @@
 #include <QChar>
 #include <QMenu>
 #include <QObject>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPoint>
 #include <QRegularExpression>
 #include <QShortcut>
@@ -176,19 +178,30 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
   connect(shortcutAutocomplete, &QShortcut::activated, [=]() { qsci->autoCompleteFromAPIs(); });
   // NOLINTEND(bugprone-suspicious-enum-usage)
 
-  scintillaLayout->setContentsMargins(2, 4, 4, 4);
+  scintillaLayout->setContentsMargins(0, 0, 0, 0);
   scintillaLayout->setSpacing(0);
   scintillaLayout->addWidget(qsci);
 
   qsci->setUtf8(true);
-  qsci->setFolding(QsciScintilla::BoxedTreeFoldStyle, 4);
+  // VS Code-like folding: plain markers (restyled to chevrons in applyEditorChrome)
+  qsci->setFolding(QsciScintilla::PlainFoldStyle, 4);
   qsci->setCaretLineVisible(true);
+  qsci->setIndentationGuides(true);
 
-  // Light inner breathing room around the text body
-  qsci->SendScintilla(QsciScintillaBase::SCI_SETMARGINLEFT, 0ull, 1);
+  // VS Code-like breathing room: taller lines + a gap between gutter and code
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETMARGINLEFT, 0ull, 6);
   qsci->SendScintilla(QsciScintillaBase::SCI_SETMARGINRIGHT, 0ull, 4);
-  qsci->SendScintilla(QsciScintillaBase::SCI_SETEXTRAASCENT, 0);
-  qsci->SendScintilla(QsciScintillaBase::SCI_SETEXTRADESCENT, 0);
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETEXTRAASCENT, 3);
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETEXTRADESCENT, 2);
+
+  // Thin 1px divider column separating the gutter from the code area
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETMARGINS, 6ul);
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETMARGINTYPEN, static_cast<unsigned long>(dividerMargin),
+                      static_cast<long>(QsciScintillaBase::SC_MARGIN_COLOUR));
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETMARGINMASKN, static_cast<unsigned long>(dividerMargin),
+                      static_cast<long>(0));
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETMARGINWIDTHN,
+                      static_cast<unsigned long>(dividerMargin), static_cast<long>(1));
 
   qsci->indicatorDefine(QsciScintilla::RoundBoxIndicator, errorIndicatorNumber);
   qsci->indicatorDefine(QsciScintilla::RoundBoxIndicator, findIndicatorNumber);
@@ -230,6 +243,7 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
 #endif
 
   initMargin();
+  applyEditorChrome(QColor(QStringLiteral("#ffffff")));
 
   connect(qsci, &QsciScintilla::textChanged, this, &ScintillaEditor::contentsChanged);
   connect(qsci, &QsciScintilla::modificationChanged, this, &ScintillaEditor::fireModificationChanged);
@@ -483,11 +497,9 @@ void ScintillaEditor::setColormap(const EditorColorScheme *colorScheme)
     auto font = this->lexer->font(this->lexer->defaultStyle());
     const QColor textColor(pt.get<std::string>("text").c_str());
     QColor paperColor(pt.get<std::string>("paper").c_str());
-    // Match AI chat / workbench surfaces (avoid stark pure-white or mismatched dark paper)
+    // Keep legacy dark papers aligned with the VS Code workbench surface
     const QString paperHex = paperColor.name(QColor::HexRgb).toLower();
-    if (paperColor == QColor(Qt::white) || paperHex == QLatin1String("#ffffff")) {
-      paperColor = QColor(QStringLiteral("#f8f8f8"));
-    } else if (paperHex == QLatin1String("#222222") || paperHex == QLatin1String("#272822")) {
+    if (paperHex == QLatin1String("#222222") || paperHex == QLatin1String("#272822")) {
       paperColor = QColor(QStringLiteral("#1e1e1e"));
     }
 
@@ -678,14 +690,83 @@ void ScintillaEditor::setColormap(const EditorColorScheme *colorScheme)
     qsci->setSelectionForegroundColor(readColor(colors, "selection-foreground", paperColor));
     qsci->setSelectionBackgroundColor(readColor(colors, "selection-background", textColor));
     qsci->setEdgeColor(readColor(colors, "edge", textColor));
+
+    applyEditorChrome(paperColor);
   } catch (const std::exception& e) {
     noColor();
   }
 }
 
+void ScintillaEditor::applyEditorChrome(const QColor& paperColor)
+{
+  const bool dark = paperColor.lightness() < 128;
+  const QColor divider = dark ? QColor(QStringLiteral("#3c3c3c")) : QColor(QStringLiteral("#e7e7e7"));
+  const QColor guide = dark ? QColor(QStringLiteral("#404040")) : QColor(QStringLiteral("#d8d8d8"));
+  const QColor arrow = dark ? QColor(QStringLiteral("#c5c5c5")) : QColor(QStringLiteral("#747474"));
+
+  // Scintilla expects colors packed as 0x00BBGGRR
+  auto sciColor = [](const QColor& c) -> long {
+    return c.red() | (c.green() << 8) | (c.blue() << 16);
+  };
+
+  // 1px column between the line-number gutter and the code
+  qsci->SendScintilla(QsciScintillaBase::SCI_SETMARGINBACKN,
+                      static_cast<unsigned long>(dividerMargin), sciColor(divider));
+
+  // Faint indentation guides, VS Code style
+  qsci->SendScintilla(QsciScintillaBase::SCI_STYLESETFORE,
+                      static_cast<unsigned long>(QsciScintillaBase::STYLE_INDENTGUIDE),
+                      sciColor(guide));
+  qsci->SendScintilla(QsciScintillaBase::SCI_STYLESETBACK,
+                      static_cast<unsigned long>(QsciScintillaBase::STYLE_INDENTGUIDE),
+                      sciColor(paperColor));
+
+  // Hide Scintilla's fold-display box. With an empty label it appears as an
+  // unattractive horizontal rule across the remainder of a collapsed line.
+  qsci->SendScintilla(QsciScintillaBase::SCI_FOLDDISPLAYTEXTSETSTYLE,
+                      static_cast<unsigned long>(QsciScintillaBase::SC_FOLDDISPLAYTEXT_HIDDEN));
+
+  // Small outline chevrons like Cursor/VS Code. Built-in arrows scale to the
+  // full line height and become visually heavy when extra line spacing is on.
+  auto foldChevron = [&arrow](bool expanded) {
+    QPixmap pixmap(12, 12);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(arrow, 1.25, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    QPainterPath path;
+    if (expanded) {
+      path.moveTo(3.5, 4.5);
+      path.lineTo(6.0, 7.0);
+      path.lineTo(8.5, 4.5);
+    } else {
+      path.moveTo(4.5, 3.5);
+      path.lineTo(7.0, 6.0);
+      path.lineTo(4.5, 8.5);
+    }
+    painter.drawPath(path);
+    return pixmap;
+  };
+
+  const QPixmap collapsed = foldChevron(false);
+  const QPixmap expanded = foldChevron(true);
+  qsci->markerDefine(collapsed, QsciScintillaBase::SC_MARKNUM_FOLDER);
+  qsci->markerDefine(collapsed, QsciScintillaBase::SC_MARKNUM_FOLDEREND);
+  qsci->markerDefine(expanded, QsciScintillaBase::SC_MARKNUM_FOLDEROPEN);
+  qsci->markerDefine(expanded, QsciScintillaBase::SC_MARKNUM_FOLDEROPENMID);
+
+  // No tree branches/tails: indentation guides already communicate nesting.
+  for (int marker : {QsciScintillaBase::SC_MARKNUM_FOLDERMIDTAIL,
+                     QsciScintillaBase::SC_MARKNUM_FOLDERTAIL,
+                     QsciScintillaBase::SC_MARKNUM_FOLDERSUB}) {
+    qsci->SendScintilla(QsciScintillaBase::SCI_MARKERDEFINE, static_cast<unsigned long>(marker),
+                        static_cast<long>(QsciScintillaBase::SC_MARK_EMPTY));
+  }
+}
+
 void ScintillaEditor::noColor()
 {
-  this->lexer->setPaper(QColor(QStringLiteral("#f8f8f8")));
+  this->lexer->setPaper(QColor(QStringLiteral("#ffffff")));
   this->lexer->setColor(Qt::black);
   qsci->setCaretWidth(2);
   qsci->setCaretForegroundColor(Qt::black);
@@ -725,10 +806,11 @@ void ScintillaEditor::noColor()
   qsci->setMatchedBraceForegroundColor(Qt::black);
   qsci->setUnmatchedBraceBackgroundColor(QColor("pink"));
   qsci->setUnmatchedBraceForegroundColor(Qt::black);
-  qsci->setMarginsBackgroundColor(QColor("whiteSmoke"));
-  qsci->setMarginsForegroundColor(QColor("gray"));
-  qsci->setFoldMarginColors(QColor("whiteSmoke"), QColor("whiteSmoke"));
+  qsci->setMarginsBackgroundColor(QColor("#ffffff"));
+  qsci->setMarginsForegroundColor(QColor("#237893"));
+  qsci->setFoldMarginColors(QColor("#ffffff"), QColor("#ffffff"));
   qsci->setEdgeColor(Qt::black);
+  applyEditorChrome(QColor(QStringLiteral("#ffffff")));
 }
 
 QStringList ScintillaEditor::colorSchemes()

@@ -59,46 +59,20 @@
 
 namespace {
 
-/*! Prefer VS Code terminal fonts (SF Mono / Menlo on macOS). */
+/*! Match Project Explorer: use the application UI font (proportional), not a terminal mono face. */
 QString resolveConsoleFontFamily(const QString& configured)
 {
   if (!configured.isEmpty()) {
     const QFont configuredFont(configured);
     const QFontInfo info(configuredFont);
-    if (info.fixedPitch()) {
+    // Accept an explicit proportional face from preferences; skip leftover mono defaults.
+    if (!info.fixedPitch()) {
       return info.family();
     }
   }
 
-  const QStringList candidates = {
-#ifdef Q_OS_MACOS
-    QStringLiteral("SF Mono"),
-    QStringLiteral("Menlo"),
-    QStringLiteral("Monaco"),
-#elif defined(Q_OS_WIN)
-    QStringLiteral("Cascadia Mono"),
-    QStringLiteral("Consolas"),
-#else
-    QStringLiteral("JetBrains Mono"),
-    QStringLiteral("Fira Code"),
-    QStringLiteral("DejaVu Sans Mono"),
-    QStringLiteral("Liberation Mono"),
-    QStringLiteral("Noto Sans Mono"),
-#endif
-    QStringLiteral("Courier New"),
-  };
-
-  for (const QString& name : candidates) {
-    if (!QFontDatabase::hasFamily(name)) {
-      continue;
-    }
-    const QFontInfo info{QFont(name)};
-    if (info.fixedPitch() || info.family().contains(name, Qt::CaseInsensitive)) {
-      return info.family();
-    }
-  }
-
-  return QFontInfo(QFontDatabase::systemFont(QFontDatabase::FixedFont)).family();
+  const QFont app = QApplication::font();
+  return QFontInfo{app}.family();
 }
 
 }  // namespace
@@ -185,31 +159,31 @@ void Console::addHtml(const QString& html)
 
 void Console::setConsoleFont(const QString& fontFamily, uint ptSize)
 {
-  // Match MainWindow flat workbench panel colors (editor / AI chrome).
+  // Match Project Explorer typography + workbench panel colors.
   const bool dark = isDarkMode();
   const QString bg = dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8");
   const QString fg = dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333");
-  const QString sel = dark ? QStringLiteral("#264f78") : QStringLiteral("#add6ff");
+  const QString sel = dark ? QStringLiteral("#094771") : QStringLiteral("#e8f1ff");
   const QString family = resolveConsoleFontFamily(fontFamily);
-  // Compact VS Code terminal: slightly smaller than editor, light stroke
-  const uint size = ptSize > 0 ? ptSize : 11;
+  const uint size = ptSize > 0 ? ptSize : 12;
   QFont font(family, static_cast<int>(size));
-  font.setStyleHint(QFont::Monospace);
-  font.setFixedPitch(true);
-  font.setWeight(QFont::Light);
+  font.setStyleHint(QFont::SansSerif);
+  font.setFixedPitch(false);
+  font.setWeight(QFont::Normal);
   this->setFont(font);
   this->document()->setDefaultFont(font);
 
   const auto stylesheet = QStringLiteral(R"(
     QPlainTextEdit {
       font-family: "%1";
-      font-size: %2pt;
-      font-weight: 300;
+      font-size: %2px;
+      font-weight: 400;
       background: %3;
       color: %4;
       border: none;
       selection-background-color: %5;
-      padding: 4px 8px;
+      padding: 6px 10px;
+      outline: 0;
     }
   )");
   this->setStyleSheet(stylesheet.arg(family, QString::number(size), bg, fg, sel));
@@ -225,7 +199,9 @@ void Console::update()
     } else {
       QTextCharFormat charFormat;
       if (line.group != message_group::NONE && line.group != message_group::Echo) {
-        charFormat.setForeground(QBrush(QColor("#000000")));
+        // Keep group text on the Explorer text color (avoid harsh pure black).
+        charFormat.setForeground(
+          QBrush(QColor(isDarkMode() ? QStringLiteral("#cccccc") : QStringLiteral("#333333"))));
       }
       charFormat.setBackground(QBrush(QColor(line.color)));
       if (!line.link.isEmpty()) {
