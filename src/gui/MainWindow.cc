@@ -4495,7 +4495,7 @@ void MainWindow::setupEditor(const QStringList& filenames)
   this->editorActivityBar->setObjectName(QStringLiteral("editorActivityBar"));
   this->editorActivityBar->setFixedWidth(kEditorActivityBarW);
   auto *activityLayout = new QVBoxLayout(this->editorActivityBar);
-  activityLayout->setContentsMargins(0, 2, 0, 2);
+  activityLayout->setContentsMargins(0, 0, 0, 0);
   activityLayout->setSpacing(0);
 
   auto makeActivityBtn = [this](const QString& tooltip, const QIcon& icon) {
