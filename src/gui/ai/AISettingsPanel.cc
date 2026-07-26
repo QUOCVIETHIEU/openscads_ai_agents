@@ -9,6 +9,7 @@
 #include "openscad_gui.h"
 #include "platform/PlatformUtils.h"
 
+#include <QAbstractItemView>
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
@@ -23,12 +24,15 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListView>
 #include <QMessageBox>
 #include <QPalette>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
+#include <QStyle>
+#include <QStyleFactory>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -37,6 +41,96 @@
 namespace {
 
 constexpr int kFieldLabelW = 78;
+
+class PolishedProfileCombo : public QComboBox
+{
+public:
+  explicit PolishedProfileCombo(QWidget *parent = nullptr) : QComboBox(parent) {}
+
+  void setPopupChrome(const QString& background, const QString& border, const QString& text,
+                      const QString& hover, const QString& selected)
+  {
+    popupCss_ = QStringLiteral(
+                  "QFrame {"
+                  "  background: %1;"
+                  "  border: 1px solid %2;"
+                  "  border-radius: 6px;"
+                  "}"
+                  "QListView {"
+                  "  background: %1;"
+                  "  color: %3;"
+                  "  border: none;"
+                  "  outline: 0;"
+                  "  padding: 4px;"
+                  "}"
+                  "QListView::item {"
+                  "  min-height: 26px;"
+                  "  padding: 5px 12px;"
+                  "  margin: 0px 1px;"
+                  "  border: none;"
+                  "  border-radius: 4px;"
+                  "  color: %3;"
+                  "  font-size: 12px;"
+                  "}"
+                  "QListView::item:hover {"
+                  "  background: %4;"
+                  "}"
+                  "QListView::item:selected {"
+                  "  background: %5;"
+                  "  color: %3;"
+                  "}")
+                  .arg(background, border, text, hover, selected);
+    if (view()) {
+      view()->setStyleSheet(popupCss_);
+    }
+  }
+
+protected:
+  void showPopup() override
+  {
+    QComboBox::showPopup();
+    if (!view()) return;
+
+    if (QWidget *container = view()->parentWidget()) {
+      if (!popupCss_.isEmpty()) {
+        container->setStyleSheet(popupCss_);
+      }
+      // Soften macOS native popup chrome (extra shadow / heavy frame).
+      if (!(container->windowFlags() & Qt::NoDropShadowWindowHint)) {
+        const QPoint pos = container->pos();
+        container->setWindowFlag(Qt::NoDropShadowWindowHint, true);
+        container->setWindowFlag(Qt::FramelessWindowHint, true);
+        container->move(pos);
+        container->show();
+      }
+    }
+  }
+
+private:
+  QString popupCss_;
+};
+
+// Fusion + custom list view: thin border, no macOS native checkmark chrome.
+void polishProfileCombo(QComboBox *combo)
+{
+  if (!combo) return;
+  combo->setObjectName(QStringLiteral("aiProfileCombo"));
+  combo->setMaxVisibleItems(10);
+  combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+  combo->setMinimumContentsLength(12);
+  if (QStyle *fusion = QStyleFactory::create(QStringLiteral("Fusion"))) {
+    combo->setStyle(fusion);
+  }
+  auto *list = new QListView(combo);
+  list->setObjectName(QStringLiteral("aiProfileComboPopup"));
+  list->setUniformItemSizes(true);
+  list->setFrameShape(QFrame::NoFrame);
+  list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  list->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+  list->setSelectionBehavior(QAbstractItemView::SelectRows);
+  list->setSpacing(1);
+  combo->setView(list);
+}
 
 QString aiSettingsPath()
 {
@@ -281,8 +375,9 @@ void AISettingsPanel::buildUi()
 
   general->addWidget(makeSectionTitle(_("Connection"), generalPage));
 
-  profileCombo = new QComboBox(generalPage);
+  profileCombo = new PolishedProfileCombo(generalPage);
   profileCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  polishProfileCombo(profileCombo);
   newProfileButton = new QPushButton(_("New"), generalPage);
   deleteProfileButton = new QPushButton(_("Delete"), generalPage);
   newProfileButton->setObjectName(QStringLiteral("secondaryBtn"));
@@ -535,10 +630,12 @@ void AISettingsPanel::applyChrome()
   const bool dark = isDarkMode();
   const QString bg = dark ? QStringLiteral("#1c1c1e") : QStringLiteral("#f2f2f4");
   const QString border = dark ? QStringLiteral("#3a3a3c") : QStringLiteral("#dcdce0");
+  const QString popupBorder = dark ? QStringLiteral("#3a3a3a") : QStringLiteral("#e6e6e6");
   const QString text = dark ? QStringLiteral("#f5f5f7") : QStringLiteral("#1d1d1f");
   const QString muted = dark ? QStringLiteral("#98989d") : QStringLiteral("#6e6e73");
   const QString input = dark ? QStringLiteral("#2c2c2e") : QStringLiteral("#ffffff");
   const QString hover = dark ? QStringLiteral("#3a3a3c") : QStringLiteral("#e8e8ec");
+  const QString selected = dark ? QStringLiteral("#094771") : QStringLiteral("#eef5ff");
   const QString btn = dark ? QStringLiteral("#3a3a3c") : QStringLiteral("#e8e8ec");
   const QString accent = dark ? QStringLiteral("#0a84ff") : QStringLiteral("#0071e3");
   const QString tabIdle = dark ? QStringLiteral("#2c2c2e") : QStringLiteral("#e5e5ea");
@@ -639,9 +736,53 @@ void AISettingsPanel::applyChrome()
     QPlainTextEdit {
       padding: 10px;
     }
+    QComboBox {
+      padding-right: 28px;
+    }
+    QComboBox:hover {
+      border: 1px solid __POPUP_BORDER__;
+    }
+    QComboBox:on {
+      border: 1px solid __ACCENT__;
+    }
     QComboBox::drop-down {
+      subcontrol-origin: padding;
+      subcontrol-position: center right;
+      width: 24px;
       border: none;
-      width: 18px;
+      background: transparent;
+    }
+    QComboBox QAbstractItemView {
+      background: __INPUT__;
+      color: __TEXT__;
+      border: 1px solid __POPUP_BORDER__;
+      border-radius: 6px;
+      padding: 4px;
+      outline: 0;
+      selection-background-color: __SELECTED__;
+      selection-color: __TEXT__;
+    }
+    QComboBox QAbstractItemView::item {
+      min-height: 26px;
+      padding: 5px 12px;
+      margin: 0px 1px;
+      border: none;
+      border-radius: 4px;
+      color: __TEXT__;
+      font-size: 12px;
+    }
+    QComboBox QAbstractItemView::item:hover {
+      background: __HOVER__;
+    }
+    QComboBox QAbstractItemView::item:selected {
+      background: __SELECTED__;
+      color: __TEXT__;
+    }
+    QListView#aiProfileComboPopup {
+      background: __INPUT__;
+      border: none;
+      padding: 2px;
+      outline: 0;
     }
     QPushButton {
       background: __BTN__;
@@ -715,15 +856,22 @@ void AISettingsPanel::applyChrome()
   )");
   css.replace(QStringLiteral("__BG__"), bg);
   css.replace(QStringLiteral("__BORDER__"), border);
+  css.replace(QStringLiteral("__POPUP_BORDER__"), popupBorder);
   css.replace(QStringLiteral("__TEXT__"), text);
   css.replace(QStringLiteral("__MUTED__"), muted);
   css.replace(QStringLiteral("__INPUT__"), input);
   css.replace(QStringLiteral("__HOVER__"), hover);
+  css.replace(QStringLiteral("__SELECTED__"), selected);
   css.replace(QStringLiteral("__BTN__"), btn);
   css.replace(QStringLiteral("__ACCENT__"), accent);
   css.replace(QStringLiteral("__TAB_IDLE__"), tabIdle);
   css.replace(QStringLiteral("__TAB_ACTIVE__"), tabActive);
   setStyleSheet(css);
+
+  if (profileCombo) {
+    static_cast<PolishedProfileCombo *>(profileCombo)->setPopupChrome(
+      input, popupBorder, text, hover, selected);
+  }
 
   if (hintLabel) {
     QPalette pal = hintLabel->palette();
