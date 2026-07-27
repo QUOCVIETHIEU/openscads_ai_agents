@@ -4,6 +4,8 @@
 #include "gui/qtgettext.h"
 #include "openscad_gui.h"
 
+#include <QApplication>
+#include <QColor>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -15,8 +17,14 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
+#include <QSet>
 #include <QStackedWidget>
+#include <QStyledItemDelegate>
+#include <QStyle>
+#include <QStyleOptionViewItem>
 #include <QTreeView>
 #include <QVBoxLayout>
 #include <QHeaderView>
@@ -24,6 +32,8 @@
 #include <QIcon>
 #include <QUrl>
 #include <QStyleFactory>
+#include <QTimer>
+#include <functional>
 
 namespace {
 
@@ -48,6 +58,131 @@ public:
       f &= ~Qt::ItemNeverHasChildren;
     }
     return f;
+  }
+};
+
+// Tight icon→label gap; paints hover/selection ourselves so macOS does not
+// force blue highlight + white text. Chevrons are drawn in-row (no branch
+// column), so child indent is only setIndentation() — not a second gutter.
+class ProjectTreeDelegate : public QStyledItemDelegate
+{
+public:
+  using QStyledItemDelegate::QStyledItemDelegate;
+
+  void setChrome(const QColor& text, const QColor& muted, const QColor& hover, const QColor& selected)
+  {
+    text_ = text;
+    muted_ = muted;
+    hover_ = hover;
+    selected_ = selected;
+  }
+
+  void paint(QPainter *painter, const QStyleOptionViewItem& option,
+             const QModelIndex& index) const override
+  {
+    QStyleOptionViewItem opt = option;
+    initStyleOption(&opt, index);
+
+    const bool selected = opt.state & QStyle::State_Selected;
+    const bool hovered = opt.state & QStyle::State_MouseOver;
+    if (selected) {
+      painter->fillRect(opt.rect, selected_);
+    } else if (hovered) {
+      painter->fillRect(opt.rect, hover_);
+    }
+
+    auto *tree = qobject_cast<const QTreeView *>(opt.widget);
+    auto *fs = tree ? qobject_cast<const QFileSystemModel *>(tree->model()) : nullptr;
+    const bool isDir = fs && fs->isDir(index);
+
+    constexpr int kIcon = 14;
+    constexpr int kChevron = 10;
+    constexpr int kGap = 3;
+
+    QRect r = opt.rect;
+    int x = r.left();
+
+    if (isDir) {
+      const bool open = tree && tree->isExpanded(index);
+      painter->save();
+      painter->setRenderHint(QPainter::Antialiasing, true);
+      QPen pen(muted_, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+      painter->setPen(pen);
+      const qreal cx = x + kChevron * 0.5;
+      const qreal cy = r.center().y();
+      if (open) {
+        // v
+        painter->drawLine(QPointF(cx - 3.2, cy - 1.2), QPointF(cx, cy + 2.0));
+        painter->drawLine(QPointF(cx, cy + 2.0), QPointF(cx + 3.2, cy - 1.2));
+      } else {
+        // >
+        painter->drawLine(QPointF(cx - 1.2, cy - 3.2), QPointF(cx + 2.0, cy));
+        painter->drawLine(QPointF(cx + 2.0, cy), QPointF(cx - 1.2, cy + 3.2));
+      }
+      painter->restore();
+      x += kChevron + kGap;
+    } else if (!opt.icon.isNull()) {
+      const QPixmap pm = opt.icon.pixmap(
+        QSize(kIcon, kIcon), (opt.state & QStyle::State_Enabled) ? QIcon::Normal : QIcon::Disabled);
+      const int y = r.top() + (r.height() - kIcon) / 2;
+      painter->drawPixmap(x, y, pm);
+      x += kIcon + kGap;
+    }
+
+    // Keep label readable on gray selection (never system HighlightedText/white).
+    painter->setPen(text_);
+    painter->setFont(opt.font);
+    painter->drawText(QRect(x, r.top(), r.right() - x, r.height()),
+                      Qt::AlignVCenter | Qt::AlignLeft | Qt::TextSingleLine, opt.text);
+  }
+
+  QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override
+  {
+    QSize s = QStyledItemDelegate::sizeHint(option, index);
+    s.setHeight(22);
+    return s;
+  }
+
+private:
+  QColor text_{QStringLiteral("#333333")};
+  QColor muted_{QStringLiteral("#6e6e6e")};
+  QColor hover_{QStringLiteral("#e8e8e8")};
+  QColor selected_{QStringLiteral("#e8e8e8")};
+};
+
+// Own folder expand/collapse on press so QTreeView's branch handler cannot
+// toggle again (that expand-then-collapse race felt like a frozen click).
+class ProjectTreeView : public QTreeView
+{
+public:
+  using QTreeView::QTreeView;
+
+  std::function<void(const QString& path, bool expanding)> folderToggleHook;
+
+protected:
+  void mousePressEvent(QMouseEvent *event) override
+  {
+    if (event->button() == Qt::LeftButton) {
+      const QModelIndex index = indexAt(event->pos());
+      auto *fs = qobject_cast<QFileSystemModel *>(model());
+      if (index.isValid() && fs && fs->isDir(index)) {
+        if (selectionModel()) {
+          selectionModel()->setCurrentIndex(
+            index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        }
+        const bool expanding = !isExpanded(index);
+        if (folderToggleHook) {
+          folderToggleHook(QDir::cleanPath(fs->filePath(index)), expanding);
+        }
+        setExpanded(index, expanding);
+        if (expanding && fs->canFetchMore(index)) {
+          fs->fetchMore(index);
+        }
+        event->accept();
+        return;
+      }
+    }
+    QTreeView::mousePressEvent(event);
   }
 };
 
@@ -343,15 +478,17 @@ ProjectExplorer::ProjectExplorer(QWidget *parent) : QWidget(parent)
   iconProvider_->setDarkMode(isDarkMode());
   model_->setIconProvider(iconProvider_);
 
-  tree_ = new QTreeView(treePage_);
+  tree_ = new ProjectTreeView(treePage_);
   tree_->setObjectName(QStringLiteral("projectExplorerTree"));
   tree_->setModel(model_);
+  tree_->setItemDelegate(new ProjectTreeDelegate(tree_));
   tree_->setHeaderHidden(true);
   tree_->setAnimated(false);
-  tree_->setIndentation(12);
-  tree_->setIconSize(QSize(16, 16));
+  // Nesting only — chevrons are painted in the delegate, not a branch column.
+  tree_->setIndentation(8);
+  tree_->setIconSize(QSize(14, 14));
   tree_->setUniformRowHeights(true);
-  tree_->setRootIsDecorated(true);
+  tree_->setRootIsDecorated(false);
   tree_->setItemsExpandable(true);
   tree_->setExpandsOnDoubleClick(false);
   tree_->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -361,6 +498,19 @@ ProjectExplorer::ProjectExplorer(QWidget *parent) : QWidget(parent)
   for (int c = 1; c < model_->columnCount(); ++c) {
     tree_->hideColumn(c);
   }
+
+  auto *projectTree = static_cast<ProjectTreeView *>(tree_);
+  projectTree->folderToggleHook = [this](const QString& path, bool expanding) {
+    if (expanding) {
+      pendingExpandPaths_.insert(path);
+    } else {
+      pendingExpandPaths_.remove(path);
+    }
+  };
+
+  connect(tree_, &QTreeView::expanded, this, &ProjectExplorer::onTreeExpanded);
+  connect(tree_, &QTreeView::collapsed, this, &ProjectExplorer::onTreeCollapsed);
+  connect(model_, &QFileSystemModel::directoryLoaded, this, &ProjectExplorer::onDirectoryLoaded);
   connect(tree_, &QTreeView::doubleClicked, this, &ProjectExplorer::onDoubleClicked);
   connect(tree_, &QTreeView::customContextMenuRequested, this, &ProjectExplorer::onCustomContextMenu);
   treeLayout->addWidget(tree_);
@@ -385,8 +535,16 @@ void ProjectExplorer::refreshTheme()
     const QModelIndex rootIndex = model_->setRootPath(root);
     tree_->setRootIndex(rootIndex);
   }
-  const QString iconRoot =
-    dark ? QStringLiteral(":/icons/chokusen-dark/svg/") : QStringLiteral(":/icons/chokusen/svg/");
+
+  const QString text = dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333");
+  const QString muted = dark ? QStringLiteral("#969696") : QStringLiteral("#6e6e6e");
+  const QString hover = dark ? QStringLiteral("#2a2d2e") : QStringLiteral("#e8e8e8");
+  // Same as hover — gray selection, never blue / white-on-blue.
+  const QString selected = hover;
+  if (auto *delegate = dynamic_cast<ProjectTreeDelegate *>(tree_->itemDelegate())) {
+    delegate->setChrome(QColor(text), QColor(muted), QColor(hover), QColor(selected));
+  }
+
   setStyleSheet(QStringLiteral(R"(
     QWidget#projectExplorer {
       background: %1;
@@ -450,50 +608,25 @@ void ProjectExplorer::refreshTheme()
     QTreeView#projectExplorerTree::item {
       min-height: 22px;
       height: 22px;
-      padding: 0px 4px;
+      padding: 0px;
     }
     QTreeView#projectExplorerTree::branch {
       background: transparent;
       border-image: none;
       image: none;
     }
-    QTreeView#projectExplorerTree::branch:hover,
-    QTreeView#projectExplorerTree::branch:selected,
-    QTreeView#projectExplorerTree::branch:selected:active,
-    QTreeView#projectExplorerTree::branch:selected:hover {
-      background: transparent;
-    }
-    QTreeView#projectExplorerTree::branch:has-children:closed {
-      border-image: none;
-      image: url(%8);
-    }
-    QTreeView#projectExplorerTree::branch:has-children:open {
-      border-image: none;
-      image: url(%9);
-    }
-    QTreeView#projectExplorerTree::branch:has-children:closed:selected,
-    QTreeView#projectExplorerTree::branch:has-children:open:selected,
-    QTreeView#projectExplorerTree::branch:has-children:closed:hover,
-    QTreeView#projectExplorerTree::branch:has-children:open:hover {
-      background: transparent;
-    }
-    QTreeView#projectExplorerTree::item:hover {
+    QTreeView#projectExplorerTree::item:hover,
+    QTreeView#projectExplorerTree::item:selected,
+    QTreeView#projectExplorerTree::item:selected:active,
+    QTreeView#projectExplorerTree::item:selected:!active {
       background: %6;
-    }
-    QTreeView#projectExplorerTree::item:selected {
-      background: %7;
       color: %4;
     }
   )")
                   .arg(dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8"),
                        dark ? QStringLiteral("#2b2b2b") : QStringLiteral("#e5e5e5"),
-                       dark ? QStringLiteral("#252526") : QStringLiteral("#f3f3f3"),
-                       dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333"),
-                       dark ? QStringLiteral("#969696") : QStringLiteral("#6e6e6e"),
-                       dark ? QStringLiteral("#2a2d2e") : QStringLiteral("#e8e8e8"),
-                       dark ? QStringLiteral("#094771") : QStringLiteral("#e8f1ff"),
-                       iconRoot + QStringLiteral("explorer-branch-right.svg"),
-                       iconRoot + QStringLiteral("explorer-branch-down.svg")));
+                       dark ? QStringLiteral("#252526") : QStringLiteral("#f3f3f3"), text, muted,
+                       hover));
 }
 
 void ProjectExplorer::setCollapsed(bool collapsed)
@@ -521,12 +654,18 @@ void ProjectExplorer::onProjectChanged()
   if (!pm.hasProject()) {
     titleLabel_->setText(_("EXPLORER"));
     stack_->setCurrentWidget(emptyPage_);
+    pendingExpandPaths_.clear();
     return;
   }
   titleLabel_->setText(pm.projectName().toUpper());
+  pendingExpandPaths_.clear();
   const QString root = pm.rootPath();
   const QModelIndex rootIndex = model_->setRootPath(root);
   tree_->setRootIndex(rootIndex);
+  // Prefetch top-level folder contents so the first expand is synchronous-feeling.
+  if (model_->canFetchMore(rootIndex)) {
+    model_->fetchMore(rootIndex);
+  }
   tree_->expandToDepth(0);
   stack_->setCurrentWidget(treePage_);
 }
@@ -548,15 +687,55 @@ bool ProjectExplorer::isProtectedPath(const QString& absolutePath) const
   return false;
 }
 
+void ProjectExplorer::onTreeExpanded(const QModelIndex& index)
+{
+  if (!index.isValid()) return;
+  const QString path = QDir::cleanPath(model_->filePath(index));
+  pendingExpandPaths_.insert(path);
+  if (model_->canFetchMore(index)) {
+    model_->fetchMore(index);
+  }
+  // Re-assert after the model finishes its layout churn on the next tick.
+  QTimer::singleShot(0, this, [this, path]() {
+    if (!pendingExpandPaths_.contains(path)) return;
+    const QModelIndex idx = model_->index(path);
+    if (idx.isValid() && !tree_->isExpanded(idx)) {
+      tree_->setExpanded(idx, true);
+    }
+  });
+}
+
+void ProjectExplorer::onTreeCollapsed(const QModelIndex& index)
+{
+  if (!index.isValid()) return;
+  pendingExpandPaths_.remove(QDir::cleanPath(model_->filePath(index)));
+}
+
+void ProjectExplorer::onDirectoryLoaded(const QString& path)
+{
+  const QString clean = QDir::cleanPath(path);
+  const QModelIndex idx = model_->index(clean);
+  if (!idx.isValid()) return;
+
+  // Prefetch children of directories so expand does not wait on the first click.
+  for (int i = 0; i < model_->rowCount(idx); ++i) {
+    const QModelIndex child = model_->index(i, 0, idx);
+    if (model_->isDir(child) && model_->canFetchMore(child)) {
+      model_->fetchMore(child);
+    }
+  }
+
+  if (!pendingExpandPaths_.contains(clean)) return;
+  if (!tree_->isExpanded(idx)) {
+    tree_->setExpanded(idx, true);
+  }
+}
+
 void ProjectExplorer::onDoubleClicked(const QModelIndex& index)
 {
   if (!index.isValid()) return;
   const QString path = absolutePathForIndex(index);
-  QFileInfo info(path);
-  if (info.isDir()) {
-    tree_->setExpanded(index, !tree_->isExpanded(index));
-    return;
-  }
+  if (QFileInfo(path).isDir()) return;
   emit openFileRequested(path);
 }
 

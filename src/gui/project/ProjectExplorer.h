@@ -2,6 +2,7 @@
 
 #include <QWidget>
 #include <QString>
+#include <QSet>
 
 class QTreeView;
 class QFileSystemModel;
@@ -33,6 +34,9 @@ public slots:
   void onProjectChanged();
 
 private slots:
+  void onTreeExpanded(const QModelIndex& index);
+  void onTreeCollapsed(const QModelIndex& index);
+  void onDirectoryLoaded(const QString& path);
   void onDoubleClicked(const QModelIndex& index);
   void onCustomContextMenu(const QPoint& pos);
   void onCollapsePressed();
@@ -50,6 +54,7 @@ private:
   QFileSystemModel *model_ = nullptr;
   ProjectFileIconProvider *iconProvider_ = nullptr;
   QPushButton *collapseBtn_ = nullptr;
+  QSet<QString> pendingExpandPaths_;
   bool collapsed_ = false;
   int expandedWidth_ = 220;
 };
