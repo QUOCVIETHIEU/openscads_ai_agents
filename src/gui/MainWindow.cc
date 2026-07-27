@@ -80,6 +80,8 @@
 #include <QToolButton>
 #include <QStyle>
 #include <QStyleFactory>
+#include <QStyleOption>
+#include <QProxyStyle>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -271,7 +273,63 @@ void removeExportActions(QToolBar *toolbar, QAction *action)
   }
 }
 
+// macOS native dock separators draw a white/3D bevel that stylesheets cannot kill.
+class FlatDockSeparatorStyle : public QProxyStyle
+{
+public:
+  using QProxyStyle::QProxyStyle;
+
+  void setColors(const QColor& separator, const QColor& hover)
+  {
+    sep_ = separator;
+    hover_ = hover;
+  }
+
+  void drawPrimitive(PrimitiveElement element, const QStyleOption *option, QPainter *painter,
+                     const QWidget *widget = nullptr) const override
+  {
+    if (element == PE_IndicatorDockWidgetResizeHandle) {
+      painter->fillRect(option->rect, (option->state & State_MouseOver) ? hover_ : sep_);
+      return;
+    }
+    QProxyStyle::drawPrimitive(element, option, painter, widget);
+  }
+
+  void drawControl(ControlElement element, const QStyleOption *option, QPainter *painter,
+                   const QWidget *widget = nullptr) const override
+  {
+    if (element == CE_Splitter) {
+      painter->fillRect(option->rect, (option->state & State_MouseOver) ? hover_ : sep_);
+      return;
+    }
+    QProxyStyle::drawControl(element, option, painter, widget);
+  }
+
+  int pixelMetric(PixelMetric metric, const QStyleOption *option = nullptr,
+                  const QWidget *widget = nullptr) const override
+  {
+    if (metric == PM_DockWidgetSeparatorExtent || metric == PM_SplitterWidth) {
+      return 1;
+    }
+    return QProxyStyle::pixelMetric(metric, option, widget);
+  }
+
+private:
+  QColor sep_{QStringLiteral("#e5e5e5")};
+  QColor hover_{QStringLiteral("#c8c8c8")};
+};
+
+FlatDockSeparatorStyle *flatDockSeparatorStyle()
+{
+  static FlatDockSeparatorStyle *style =
+    new FlatDockSeparatorStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+  return style;
+}
+
 constexpr int kEditorActivityBarW = 32;
+// Left dock can shrink below QTreeView/QStackedWidget sizeHints (~256).
+// Floor keeps the activity bar + a slim content strip usable.
+constexpr int kLeftDockMinExpandedW = 120;
 constexpr int kWorkbenchHeaderH = 32;
 
 QIcon projectActivityIcon()
@@ -1565,7 +1623,7 @@ void MainWindow::setEditorAreaContentVisible(bool visible)
       resizeDocks({this->editorDock}, {kActivityBarW}, Qt::Horizontal);
     } else {
       this->editorDock->setMaximumWidth(QWIDGETSIZE_MAX);
-      this->editorDock->setMinimumWidth(0);
+      this->editorDock->setMinimumWidth(kLeftDockMinExpandedW);
       const int restore =
         this->editorAreaExpandedWidth > kActivityBarW ? this->editorAreaExpandedWidth : 400;
       resizeDocks({this->editorDock}, {restore}, Qt::Horizontal);
@@ -4543,17 +4601,38 @@ void MainWindow::setupEditor(const QStringList& filenames)
   activityLayout->addStretch(1);
 
   this->projectExplorer = new ProjectExplorer(editorArea);
+  this->projectExplorer->setMinimumWidth(0);
+  this->projectExplorer->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
 
   this->editorAreaStack = new QStackedWidget(editorArea);
   this->editorAreaStack->setObjectName(QStringLiteral("editorAreaStack"));
   this->editorAreaStack->setFrameShape(QFrame::NoFrame);
+  this->editorAreaStack->setMinimumWidth(0);
+  // Ignored: QStackedWidget otherwise takes max(sizeHint) of all pages (~256 from QTreeView).
+  this->editorAreaStack->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
   this->editorAreaStack->addWidget(this->projectExplorer);           // index 0: Project
-  this->editorAreaStack->addWidget(tabManager->getTabContent());     // index 1: Editor
+  QWidget *tabContent = tabManager->getTabContent();
+  tabContent->setMinimumWidth(0);
+  tabContent->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+  this->editorAreaStack->addWidget(tabContent);                     // index 1: Editor
+
+  editorArea->setMinimumWidth(0);
+  editorArea->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+  if (editorDockContents) {
+    editorDockContents->setMinimumWidth(0);
+  }
+  if (editorDock) {
+    editorDock->setMinimumWidth(kLeftDockMinExpandedW);
+  }
 
   // Single 1px flat divider (avoids double border / white bevel next to the line).
   auto *activityDivider = new QFrame(editorArea);
   activityDivider->setObjectName(QStringLiteral("editorActivityDivider"));
   activityDivider->setFrameShape(QFrame::NoFrame);
+  activityDivider->setFrameShadow(QFrame::Plain);
+  activityDivider->setLineWidth(0);
+  activityDivider->setMidLineWidth(0);
+  activityDivider->setAttribute(Qt::WA_StyledBackground, true);
   activityDivider->setFixedWidth(1);
   activityDivider->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
 
@@ -4973,13 +5052,17 @@ void MainWindow::updateZoomPercentLabel()
 
 void MainWindow::applyFlatWorkbenchChrome()
 {
-  // Match editor|preview divider to the thin flat AI chat separator (no 3D bevel).
-  // Editor panel background matches AI chat (#f8f8f8 / #1e1e1e).
+  // Flat 1px dock/activity dividers — no macOS white/3D bevel.
   const bool dark = isDarkMode();
   const QString sep = dark ? QStringLiteral("#2b2b2b") : QStringLiteral("#e5e5e5");
   const QString sepHover = dark ? QStringLiteral("#3c3c3c") : QStringLiteral("#c8c8c8");
   const QString panelBg = dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8");
   const QString headerBg = dark ? QStringLiteral("#252526") : QStringLiteral("#f3f3f3");
+
+  if (auto *flat = flatDockSeparatorStyle()) {
+    flat->setColors(QColor(sep), QColor(sepHover));
+    setStyle(flat);
+  }
 
   setStyleSheet(QStringLiteral(R"(
     QMainWindow::separator {
@@ -4989,6 +5072,10 @@ void MainWindow::applyFlatWorkbenchChrome()
       margin: 0px;
       padding: 0px;
       border: none;
+      border-left: none;
+      border-right: none;
+      border-top: none;
+      border-bottom: none;
     }
     QMainWindow::separator:hover {
       background: %2;
@@ -5031,6 +5118,10 @@ void MainWindow::applyFlatWorkbenchChrome()
       padding: 0px;
       max-width: 1px;
       min-width: 1px;
+    }
+    QWidget#editorActivityBar {
+      border: none;
+      border-right: none;
     }
     QWidget#consoleDockContents Console,
     QWidget#consoleDockContents QPlainTextEdit {
@@ -5242,14 +5333,18 @@ void MainWindow::applyFlatWorkbenchChrome()
     }
   }
   if (findInputField) {
+    // Keep find usable but don't lock the whole left dock at ~250px.
+    findInputField->setMinimumWidth(80);
     findInputField->setMaximumWidth(240);
-    findInputField->setMinimumWidth(160);
-    findInputField->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    findInputField->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
   }
   if (replaceInputField) {
+    replaceInputField->setMinimumWidth(80);
     replaceInputField->setMaximumWidth(240);
-    replaceInputField->setMinimumWidth(160);
-    replaceInputField->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    replaceInputField->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+  }
+  if (find_panel) {
+    find_panel->setMinimumWidth(0);
   }
 
   // Keep Console flat / theme-matched when chrome or OS theme changes

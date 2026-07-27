@@ -1572,7 +1572,7 @@ void ChatWidget::setCollapsed(bool collapsed)
     restoreExpandedChrome();
     if (dock) {
       const int targetW = qMax(280, expandedDockWidth);
-      dock->setMinimumWidth(220);
+      dock->setMinimumWidth(150);
       dock->setMaximumWidth(QWIDGETSIZE_MAX);
       auto *mw = qobject_cast<QMainWindow *>(dock->window());
       if (!mw) mw = qobject_cast<QMainWindow *>(dock->parentWidget());

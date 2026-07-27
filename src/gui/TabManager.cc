@@ -306,6 +306,8 @@ TabManager::TabManager(MainWindow *o, const QString& filename)
 
   contentStack_ = new QStackedWidget();
   contentStack_->setObjectName(QStringLiteral("editorContentStack"));
+  contentStack_->setMinimumWidth(0);
+  contentStack_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
   contentStack_->addWidget(emptyPage_);
   contentStack_->addWidget(tabWidget);
 

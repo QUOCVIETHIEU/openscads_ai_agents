@@ -21,6 +21,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QSet>
+#include <QSizePolicy>
 #include <QStackedWidget>
 #include <QStyledItemDelegate>
 #include <QStyle>
@@ -494,6 +495,11 @@ ProjectExplorer::ProjectExplorer(QWidget *parent) : QWidget(parent)
   tree_->setContextMenuPolicy(Qt::CustomContextMenu);
   // Rename only via the context-menu dialog, never inline on the tree.
   tree_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  // Allow the left dock to shrink below QTreeView's default ~256px sizeHint.
+  tree_->setMinimumWidth(0);
+  tree_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+  setMinimumWidth(0);
+  setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
   // Hide size/type/date columns
   for (int c = 1; c < model_->columnCount(); ++c) {
     tree_->hideColumn(c);
