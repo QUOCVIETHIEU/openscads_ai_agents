@@ -542,15 +542,17 @@ void ProjectExplorer::refreshTheme()
     tree_->setRootIndex(rootIndex);
   }
 
+  const QString bg = dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8");
+  const QString border = dark ? QStringLiteral("#2b2b2b") : QStringLiteral("#e5e5e5");
+  // Same surface as AI chat panel (not the darker header strip).
+  const QString header = bg;
   const QString text = dark ? QStringLiteral("#cccccc") : QStringLiteral("#333333");
   const QString muted = dark ? QStringLiteral("#969696") : QStringLiteral("#6e6e6e");
   const QString hover = dark ? QStringLiteral("#2a2d2e") : QStringLiteral("#e8e8e8");
-  // Same as hover — gray selection, never blue / white-on-blue.
   const QString selected = hover;
   if (auto *delegate = dynamic_cast<ProjectTreeDelegate *>(tree_->itemDelegate())) {
     delegate->setChrome(QColor(text), QColor(muted), QColor(hover), QColor(selected));
   }
-
   setStyleSheet(QStringLiteral(R"(
     QWidget#projectExplorer {
       background: %1;
@@ -629,10 +631,7 @@ void ProjectExplorer::refreshTheme()
       color: %4;
     }
   )")
-                  .arg(dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8"),
-                       dark ? QStringLiteral("#2b2b2b") : QStringLiteral("#e5e5e5"),
-                       dark ? QStringLiteral("#252526") : QStringLiteral("#f3f3f3"), text, muted,
-                       hover));
+                  .arg(bg, border, header, text, muted, hover));
 }
 
 void ProjectExplorer::setCollapsed(bool collapsed)

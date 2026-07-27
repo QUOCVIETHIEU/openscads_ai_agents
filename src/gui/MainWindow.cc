@@ -533,10 +533,18 @@ void MainWindow::openFileFromPath(const QString& path, int line)
   if (editorDock->isVisible()) {
     auto guard = scopedSetCurrentOutput();
     activeEditor->setFocus();
-    if (!path.isEmpty()) tabManager->open(path);
+    if (!path.isEmpty()) openFileInEditorAndPreview(path);
     activeEditor->setFocus();
     activeEditor->setCursorPosition(line, 0);
   }
+}
+
+void MainWindow::openFileInEditorAndPreview(const QString& path)
+{
+  if (path.isEmpty()) return;
+  tabManager->open(path);
+  showEditorView();
+  actionRenderPreview();
 }
 
 void MainWindow::addKeyboardShortCut(const QList<QAction *>& actions)
@@ -1410,7 +1418,7 @@ void MainWindow::on_fileActionOpen_triggered()
     if (!i.exists()) {
       return;
     }
-    tabManager->open(i.filePath());
+    openFileInEditorAndPreview(i.filePath());
   }
 }
 
@@ -1434,7 +1442,8 @@ void MainWindow::actionOpenRecent()
 {
   auto guard = scopedSetCurrentOutput();
   auto action = qobject_cast<QAction *>(sender());
-  tabManager->open(action->data().toString());
+  if (!action) return;
+  openFileInEditorAndPreview(action->data().toString());
 }
 
 void MainWindow::on_fileActionClearRecent_triggered()
@@ -1564,9 +1573,8 @@ void MainWindow::onProjectExplorerOpenFile(const QString& path)
     QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     return;
   }
-  tabManager->open(path);
+  openFileInEditorAndPreview(path);
   ProjectManager::instance().setActiveFile(path);
-  showEditorView();
 }
 
 void MainWindow::onProjectExplorerRenderFile(const QString& path)
@@ -1744,7 +1752,7 @@ void MainWindow::actionOpenExample()
   const auto action = qobject_cast<QAction *>(sender());
   if (action) {
     const auto& path = action->data().toString();
-    tabManager->open(path);
+    openFileInEditorAndPreview(path);
   }
 }
 
@@ -4088,7 +4096,7 @@ void MainWindow::handleFileDrop(const QUrl& url)
   const auto suffix = fileInfo.suffix().toLower();
   const auto cmd = Importer::knownFileExtensions[suffix];
   if (cmd.isEmpty()) {
-    tabManager->open(fileName);
+    openFileInEditorAndPreview(fileName);
   } else {
     activeEditor->insert(cmd.arg(fileName));
   }
@@ -5369,7 +5377,8 @@ void MainWindow::applyFlatWorkbenchChrome()
     const QString muted = dark ? QStringLiteral("#858585") : QStringLiteral("#616161");
     const QString hover = dark ? QStringLiteral("#2a2d2e") : QStringLiteral("#e8e8e8");
     const QString accent = dark ? QStringLiteral("#007acc") : QStringLiteral("#005fb8");
-    const QString barBg = dark ? QStringLiteral("#333333") : QStringLiteral("#f3f3f3");
+    // Match AI chat / editor panel background (#f8f8f8 / #1e1e1e).
+    const QString barBg = dark ? QStringLiteral("#1e1e1e") : QStringLiteral("#f8f8f8");
     this->editorActivityBar->setStyleSheet(
       QStringLiteral(R"(
         QWidget#editorActivityBar {

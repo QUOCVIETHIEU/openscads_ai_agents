@@ -26,6 +26,7 @@
 
     <file>icons/button.png</file>
     <file>icons/background-welcome-screen.svg</file>
+    <file>icons/ico_openscad_ai.svg</file>
     <file>icons/stopbutton.png</file>
     <file>icons/background.png</file>
   </qresource>

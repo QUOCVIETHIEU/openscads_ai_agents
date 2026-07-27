@@ -291,6 +291,7 @@ private:
   void addExportActions(QToolBar *toolbar, QAction *action) const;
   QAction *formatIdentifierToAction(const std::string& identifier) const;
   QString getDockBaseName(const QString& title) const;
+  void openFileInEditorAndPreview(const QString& path);
 
   LibraryInfoDialog *libraryInfoDialog{nullptr};
   FontListDialog *fontListDialog{nullptr};

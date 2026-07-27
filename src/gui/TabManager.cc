@@ -20,11 +20,14 @@
 #include <QFont>
 #include <QIcon>
 #include <QMessageBox>
+#include <QPainter>
 #include <QPalette>
+#include <QPixmap>
 #include <QPoint>
 #include <QSaveFile>
 #include <QShortcut>
 #include <QStringList>
+#include <QSvgRenderer>
 #include <QTabBar>
 #include <QTextStream>
 #include <QStyle>
@@ -292,13 +295,45 @@ TabManager::TabManager(MainWindow *o, const QString& filename)
                                                 : QStringLiteral("#f8f8f8")));
   auto *emptyLayout = new QVBoxLayout(emptyPage_);
   emptyLayout->setContentsMargins(24, 24, 24, 24);
+  emptyLayout->setSpacing(12);
   emptyLayout->addStretch(1);
+
+  constexpr int kIconHeight = 75;  // ~2/3 of previous 112
+  constexpr int kIconPad = 6;  // keep AA from clipping viewBox edges
+  QPixmap logoPix;
+  {
+    QSvgRenderer renderer(QStringLiteral(":/icons/ico_openscad_ai.svg"));
+    if (renderer.isValid()) {
+      const QRectF vb = renderer.viewBoxF().isEmpty()
+                          ? QRectF(QPointF(0, 0), QSizeF(renderer.defaultSize()))
+                          : renderer.viewBoxF();
+      const int contentH = kIconHeight;
+      const int contentW =
+        vb.height() > 0 ? qMax(1, qRound(contentH * vb.width() / vb.height())) : contentH;
+      const qreal dpr = qApp->devicePixelRatio();
+      logoPix = QPixmap(QSize(contentW + 2 * kIconPad, contentH + 2 * kIconPad) * dpr);
+      logoPix.setDevicePixelRatio(dpr);
+      logoPix.fill(Qt::transparent);
+      QPainter painter(&logoPix);
+      painter.setRenderHint(QPainter::Antialiasing, true);
+      painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+      renderer.render(&painter, QRectF(kIconPad, kIconPad, contentW, contentH));
+    }
+  }
+  auto *logo = new QLabel(emptyPage_);
+  logo->setObjectName(QStringLiteral("editorEmptyIcon"));
+  logo->setPixmap(logoPix);
+  logo->setAlignment(Qt::AlignCenter);
+  logo->setMinimumSize(logoPix.isNull() ? QSize() : logoPix.deviceIndependentSize().toSize());
+  emptyLayout->addWidget(logo, 0, Qt::AlignHCenter);
+
   auto *hint = new QLabel(_("No file open"), emptyPage_);
   hint->setObjectName(QStringLiteral("editorEmptyHint"));
   hint->setAlignment(Qt::AlignCenter);
   hint->setStyleSheet(QStringLiteral("color: #8a8a8a; font-size: 13px;"));
   emptyLayout->addWidget(hint, 0, Qt::AlignHCenter);
   auto *sub = new QLabel(_("Open a .scad file from the Project explorer"), emptyPage_);
+  sub->setObjectName(QStringLiteral("editorEmptySubHint"));
   sub->setAlignment(Qt::AlignCenter);
   sub->setStyleSheet(QStringLiteral("color: #a8a8a8; font-size: 12px;"));
   emptyLayout->addWidget(sub, 0, Qt::AlignHCenter);
@@ -324,6 +359,12 @@ void TabManager::applyTheme()
 {
   applyVSCodeTabStyle(tabWidget);
   refreshTabCloseButtons();
+  if (emptyPage_) {
+    emptyPage_->setStyleSheet(QStringLiteral(
+      "QWidget#editorEmptyPage { background: %1; }")
+                                .arg(isDarkMode() ? QStringLiteral("#1e1e1e")
+                                                  : QStringLiteral("#f8f8f8")));
+  }
 }
 
 void TabManager::installTabCloseButton(int index)
