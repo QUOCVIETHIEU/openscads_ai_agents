@@ -1,0 +1,131 @@
+name: Windows(msys2) Experimental Tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: 'Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)'
+        required: false
+        default: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        qt: [qt6]
+    runs-on: windows-latest
+    name: windows-latest ${{ matrix.qt }}
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: 'recursive'
+      - name: Setup (detached) tmate session if enabled
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        with:
+          detached: true
+      - name: Calculate PACBOY_PACKAGES
+        shell: bash
+        run: |
+          pwd
+          ./scripts/msys2-install-dependencies.sh ${{ matrix.qt }}
+      - name: Setup MSYS2 Environment
+        uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: true
+          install: libxml2
+          pacboy: ${{ env.PACBOY_PACKAGES }}
+      - name: Install Mesa
+        uses: ssciwr/setup-mesa-dist-win@v3
+        with:
+          version: '22.1.7'
+          build-type: 'release-mingw'
+      - name: Build OpenSCAD
+        run: |
+          mkdir build && cd build
+          cmake .. -G"Ninja" -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release -DEXPERIMENTAL=ON -DSNAPSHOT=ON -DUSE_QT6=ON
+          cmake --build . -j4
+          cmake --install . --prefix=.
+      - name: Package runnable Windows build
+        run: |
+          set -euo pipefail
+          PACKAGE_DIR="${GITHUB_WORKSPACE}/openscad-windows"
+          rm -rf "$PACKAGE_DIR"
+          cmake --install build --prefix="$PACKAGE_DIR"
+
+          EXE=$(find "$PACKAGE_DIR" -maxdepth 1 -name 'openscad*.exe' | head -n 1)
+          if [ -z "$EXE" ]; then
+            echo "No openscad*.exe found under $PACKAGE_DIR"
+            ls -la "$PACKAGE_DIR"
+            exit 1
+          fi
+          echo "Packaging executable: $EXE"
+
+          copy_ucrt_deps() {
+            local target="$1"
+            ldd "$target" 2>/dev/null | awk '/\/ucrt64\// {print $3}' | sort -u | while read -r dll; do
+              if [ -f "$dll" ]; then
+                cp -n "$dll" "$PACKAGE_DIR/" || true
+              fi
+            done
+          }
+
+          copy_ucrt_deps "$EXE"
+
+          if command -v windeployqt6 >/dev/null 2>&1; then
+            windeployqt6 --release --no-translations "$EXE" || true
+          elif command -v windeployqt >/dev/null 2>&1; then
+            windeployqt --release --no-translations "$EXE" || true
+          else
+            QT_PLUGINS="${MSYSTEM_PREFIX}/share/qt6/plugins"
+            if [ -d "$QT_PLUGINS" ]; then
+              mkdir -p "$PACKAGE_DIR/platforms" "$PACKAGE_DIR/imageformats" "$PACKAGE_DIR/styles" "$PACKAGE_DIR/tls"
+              cp -n "$QT_PLUGINS"/platforms/qwindows.dll "$PACKAGE_DIR/platforms/" 2>/dev/null || true
+              cp -n "$QT_PLUGINS"/imageformats/*.dll "$PACKAGE_DIR/imageformats/" 2>/dev/null || true
+              cp -n "$QT_PLUGINS"/styles/*.dll "$PACKAGE_DIR/styles/" 2>/dev/null || true
+              cp -n "$QT_PLUGINS"/tls/*.dll "$PACKAGE_DIR/tls/" 2>/dev/null || true
+            fi
+          fi
+
+          # Pull transitive UCRT deps for any newly copied DLLs/plugins
+          find "$PACKAGE_DIR" -type f \( -name '*.dll' -o -name '*.exe' \) | while read -r bin; do
+            copy_ucrt_deps "$bin"
+          done
+
+          echo "Package contents:"
+          find "$PACKAGE_DIR" -maxdepth 2 -type f | sort | head -n 80
+          ls -lh "$EXE"
+      - name: Upload Windows runnable package
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenSCAD-Windows-x64-${{ matrix.qt }}
+          path: openscad-windows/
+          if-no-files-found: error
+      - name: Run Test Suite
+        continue-on-error: true
+        run: |
+          cd build
+          ctest -j4
+      - name: Setup (detached) tmate session if enabled
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+      - name: Upload Test Result Report
+        uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: Test Result Report (Windows ${{ matrix.qt }})
+          path: |
+            build/Testing/Temporary/*_report.html
+            build/Testing/Temporary/LastTest.log
